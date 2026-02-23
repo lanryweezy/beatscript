@@ -1,0 +1,112 @@
+// LALRPOP Grammar for a compilable BeatScript
+
+use crate::lang::{self, TopLevelItem, SectionItem, TrackItem};
+
+grammar;
+
+// The parser will produce a Project struct.
+pub Project: lang::Project = {
+    <items:TopLevelItem*> => {
+        let mut proj = lang::Project::default();
+        for item in items {
+            match item {
+                TopLevelItem::Timeline(t) => proj.timeline = t,
+                TopLevelItem::Section(s) => proj.sections.push(s),
+                TopLevelItem::Synth(s) => proj.synths.push(s),
+            }
+        }
+        proj
+    }
+};
+
+// An item at the top level of the file
+TopLevelItem: TopLevelItem = {
+    <t:Timeline> => TopLevelItem::Timeline(t),
+    <s:Section> => TopLevelItem::Section(s),
+    <sy:Synth> => TopLevelItem::Synth(sy),
+};
+
+// This enum is conceptual - LALRPOP generates it from the rules above.
+// enum TopLevelItem {
+//     Timeline(Vec<String>),
+//     Section(lang::Section),
+//     Synth(lang::Synth),
+// }
+
+// `timeline: [verse, chorus]`
+Timeline: Vec<String> = {
+    "timeline" ":" "[" <v:Comma<Identifier>> "]" => v,
+};
+
+// `synth my_synth {}`
+Synth: lang::Synth = {
+    "synth" <name:Identifier> "{" "}" => lang::Synth { name, ..Default::default() },
+};
+
+// `section verse { ... }`
+Section: lang::Section = {
+    "section" <name:Identifier> "{" <items:SectionItem*> "}" => {
+        let mut sec = lang::Section { name, ..Default::default() };
+        for item in items {
+            match item {
+                SectionItem::Length(l) => sec.length_bars = l,
+                SectionItem::Track(t) => sec.tracks.push(t),
+            }
+        }
+        sec
+    }
+};
+
+SectionItem: SectionItem = {
+    "length" ":" <l:Integer> => SectionItem::Length(l as u32),
+    <t:Track> => SectionItem::Track(t),
+};
+
+// This enum is conceptual.
+// enum SectionItem {
+//     Length(u32),
+//     Track(lang::Track),
+// }
+
+// `track kick { instrument: "kick_synth", pattern: ... }`
+Track: lang::Track = {
+    "track" <name:Identifier> "{" <items:TrackItem*> "}" => {
+        let mut track = lang::Track { name, instrument: String::new(), pattern: lang::Pattern::Notes(vec![]) };
+        for item in items {
+            match item {
+                TrackItem::Instrument(i) => track.instrument = i,
+                TrackItem::Pattern(p) => track.pattern = p,
+            }
+        }
+        track
+    }
+};
+
+TrackItem: TrackItem = {
+    "instrument" ":" <i:String> => TrackItem::Instrument(i),
+    "pattern" ":" <p:Pattern> => TrackItem::Pattern(p),
+};
+
+// This enum is conceptual.
+// enum TrackItem {
+//     Instrument(String),
+//     Pattern(lang::Pattern),
+// }
+
+Pattern: lang::Pattern = {
+    "euclid" "(" <h:Integer> "," <s:Integer> ")" => lang::Pattern::Euclidean { hits: h as u8, steps: s as u8 },
+};
+
+// --- Terminals ---
+
+Identifier: String = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s.to_string();
+String: String = <s:r#""([^"\\]|\\.)*""#> => s.to_string();
+Integer: i64 = <s:r"[0-9]+"> => s.parse().unwrap();
+
+// Comma separated list helper
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => { let mut v = v; v.push(e); v }
+    }
+};

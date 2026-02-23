@@ -1,0 +1,49 @@
+[package]
+name = "beatscript-cosmos"
+version = "0.1.0"
+edition = "2021"
+authors = ["Gemini Agent"]
+description = "BeatScript V12 Cosmos Engine: A next-generation environment for music creation."
+
+[dependencies]
+# Core audio backend
+cpal = "0.15"
+
+# GUI Framework - Iced is a data-centric GUI library, perfect for our reactive UI
+iced = { version = "0.12", features = ["tokio", "wgpu", "advanced"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Parsing the BeatScript language
+lalrpop = "0.20"
+lalrpop-util = "0.20"
+
+# Real-time safe data structures
+crossbeam = "0.8"
+
+# Random number generation
+rand = "0.8"
+
+# DSP and audio libraries
+# fundsp = { version = "0.12", features = ["sample"] }  # DSP graphs - commented out due to feature issue
+hound = "3.5"  # WAV file support
+rodio = "0.17"  # Audio playback
+
+
+
+# Additional utilities
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+byteorder = "1.4"
+
+# JIT Compilation (long-term goal)
+# cranelift = { version = "0.98", optional = true }
+
+# Logging
+env_logger = "0.11"
+log = "0.4"
+
+[build-dependencies]
+# Build script for LALRPOP
+lalrpop = "0.20"

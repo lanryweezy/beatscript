@@ -1,0 +1,83 @@
+// GENESIS BLOCK: First Light
+// ID: 0000-0001
+// The first Living Composition in the Symphony of Echoes.
+
+composition {
+    title: "First Light",
+    artist: "Aethel & Logos",
+    key: "C minor",
+    bpm: 70
+}
+
+// --- Instruments ---
+
+synth felt_piano {
+    type: physical_model,
+    model: {
+        material: "felted_wool_on_steel_string",
+        size: 1.2m,
+        qualia: { temperature: "cool", brightness: "soft" }
+    }
+}
+
+synth void_pad {
+    type: subtractive,
+    osc1: { shape: sine, detune: -0.02 },
+    osc2: { shape: sine, detune: 0.02 },
+    filter: { type: lowpass, cutoff: 600.0 },
+    env: { attack: 4.5, decay: 1.0, sustain: 1.0, release: 5.0 }
+}
+
+// --- Effects ---
+
+fx_chain echo_chamber {
+    // A literal echo, the theme of the piece.
+    delay {
+        time: 0.857, // Dotted 8th note at 70 bpm
+        feedback: 0.4,
+        wet: 0.3
+    }
+    reverb {
+        size: 0.9,
+        damping: 0.6,
+        wet: 0.2
+    }
+}
+
+// --- Arrangement ---
+
+timeline: [pulse, melody, space, melody, fade]
+
+section pulse {
+    length: 2
+    track heartbeat {
+        instrument: felt_piano,
+        pattern: [C1, _, _, _, _, _, _, _]
+    }
+}
+
+section melody {
+    length: 4
+    track piano_melody {
+        instrument: felt_piano,
+        pattern: [G3, _, Eb4, _, D4, _, C4, _, G3, _, _, _, _, _, _, _],
+        send: { to: "echo_chamber", amount: 0.8 }
+    }
+    track pad {
+        instrument: void_pad,
+        pattern: [[C2, G2, Eb3], _, _, _, _, _, _, _] // A single, sustained chord
+    }
+}
+
+section space {
+    length: 2
+    // Two bars of silence, leaving room for the echoes to decay.
+}
+
+section fade {
+    length: 2
+    track final_note {
+        instrument: felt_piano,
+        pattern: [C5, _, _, _, _, _, _, _]
+    }
+}

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BeatScript Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js"></script>
+</head>
+<body>
+  <h1>BeatScript Demo – Play the Beat</h1>
+  <textarea id="script" rows="15" cols="80" placeholder="Paste BeatScript here…"></textarea><br>
+  <button id="play">Play</button>
+
+  <script>
+  // --- 1️⃣  Parse BeatScript (very lightweight) -------------
+  function parseBeat(str){
+    const res = {}; // key → value
+    const lines = str.split(/\r?\n/).map(l=>l.trim()).filter(l=>l && !l.startsWith('#'));
+    let section=null;
+    lines.forEach(l=>{
+      if(l.startsWith('section')){
+        section=l.split(/\s+/)[1];
+        res[section]={};
+        section=section;
+        return;
+      }
+      const [k,v] = l.split(':').map(s=>s.trim());
+      if(section){
+        res[section][k]=parseVal(v);
+      }else{
+        res[k]=parseVal(v);
+      }
+    });
+    return res;
+  }
+  function parseVal(v){
+    if(v.startsWith('[')) return JSON.parse(v.replace(/'/g,'"'));
+    if(v.startsWith('{')) return JSON.parse(v.replace(/'/g,'"'));
+    if(/^\d+$/.test(v)) return +v;
+    if(/^".*"$/.test(v)) return v.slice(1,-1);
+    return v; // identifier
+  }
+
+  // --- 2️⃣  Tone.js setup ---------------------------------
+  const synth = new Tone.Synth().toDestination();
+  const kick = new Tone.MembraneSynth().toDestination();
+  const snare = new Tone.MetalSynth().toDestination();
+  const hihat = new Tone.MetalSynth({pitchDecay: 0.3}).toDestination();
+  const drums = { kick, snare, hiHat: hihat, 808: snare, melody: synth };
+
+  document.getElementById('play').addEventListener('click', async ()=>{
+    const beat = parseBeat(document.getElementById('script').value);
+    const tempo = beat.tempo || 120;
+    Tone.Transport.bpm.value = tempo;
+    Tone.Transport.start();
+
+    const layers = beat.layers || [];
+    const patterns = beat.patterns || {};
+    const melody = beat.melody || [];
+    const loop = beat.loop || 4;
+
+    // schedule all layers
+    for(let b=0; b<loop; b++){
+      layers.forEach(layer=>{
+        const pat = patterns[layer] || "0".repeat(16);
+        for(let i=0; i<16; i++){
+          const step = pat[i];
+          const time = `${b}m + ${i/4}s`;
+          if(step==='1'){
+            if(layer==='melody'){
+              const note = melody[i % melody.length];
+              synth.triggerAttackRelease(note, "8n", time);
+            }else{
+              drums[layer].triggerAttackRelease('C2', "8n", time);
+            }
+          }
+        }
+      });
+    }
+  });
+  </script>
+</body>
+</html>
