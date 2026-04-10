@@ -1,20 +1,40 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as Tone from 'tone';
 import Editor from '@monaco-editor/react';
-import { Play, Square, Music, Cpu, Zap, Activity } from 'lucide-react';
+import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Copy, Check } from 'lucide-react';
 
+// --- Types ---
 interface BeatScript {
-  tempo?: number;
-  layers?: string[];
-  patterns?: Record<string, string>;
-  melody?: string[];
-  loop?: number;
-  composition?: any;
+  bpm: number;
+  sections: Record<string, Section>;
+  synths: Record<string, any>;
+  timeline: string[];
 }
 
+interface Section {
+  length: number;
+  tracks: Record<string, Track>;
+}
+
+interface Track {
+  instrument: string;
+  pattern: string | string[];
+}
+
+// --- Constants ---
 const DEFAULT_SCRIPT = `composition {
   title: "Neon Sunset",
   bpm: 95
+}
+
+synth kick_synth {
+  type: "membrane",
+  frequency: 50
+}
+
+synth snare_synth {
+  type: "noise",
+  decay: 0.1
 }
 
 section main {
@@ -43,65 +63,105 @@ timeline: ["main"]
 const BeatScriptApp: React.FC = () => {
   const [script, setScript] = useState(DEFAULT_SCRIPT);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [bpm, setBpm] = useState(120);
+  const [bpm, setBpm] = useState(95);
+  const [cursorPos, setCursorPos] = useState({ lineNumber: 1, column: 1 });
+  const [projection, setProjection] = useState<any>(null);
+  const [visualizerData, setVisualizerData] = useState<number[]>(new Array(32).fill(0));
+  const [copied, setCopied] = useState(false);
 
   // Audio nodes
   const synths = useRef<Record<string, any>>({});
+  const analyser = useRef<Tone.Analyser | null>(null);
 
   useEffect(() => {
     // Setup Tone.js
+    analyser.current = new Tone.Analyser('waveform', 32);
+
     synths.current = {
-      lead: new Tone.PolySynth(Tone.Synth).toDestination(),
-      kick: new Tone.MembraneSynth().toDestination(),
-      snare: new Tone.MetalSynth().toDestination(),
-      hihat: new Tone.MetalSynth({
+      melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current).toDestination(),
+      kick_synth: new Tone.MembraneSynth().connect(analyser.current).toDestination(),
+      snare_synth: new Tone.MetalSynth().connect(analyser.current).toDestination(),
+      hihat_synth: new Tone.MetalSynth({
         envelope: {
           attack: 0.001,
           decay: 0.1,
           release: 0.01
         }
-      }).toDestination()
+      }).connect(analyser.current).toDestination()
     };
 
+    const interval = setInterval(() => {
+      if (analyser.current && isPlaying) {
+        const values = analyser.current.getValue() as Float32Array;
+        const normalized = Array.from(values).map(v => Math.abs(v) * 100);
+        setVisualizerData(normalized);
+      } else if (!isPlaying) {
+        setVisualizerData(new Array(32).fill(0).map(() => Math.random() * 5));
+      }
+    }, 50);
+
     return () => {
+      clearInterval(interval);
       Object.values(synths.current).forEach(s => s.dispose());
       Tone.Transport.stop();
     };
-  }, []);
+  }, [isPlaying]);
 
+  // Robust-ish parser
   const parseBeatScript = (str: string): BeatScript => {
-    const res: any = { patterns: {}, layers: [] };
+    const res: BeatScript = { bpm: 120, sections: {}, synths: {}, timeline: [] };
 
-    // Very basic block-aware parser
-    const compositionMatch = str.match(/composition\s*\{([^}]*)\}/);
-    if (compositionMatch) {
-      const content = compositionMatch[1];
-      const bpmMatch = content.match(/bpm:\s*(\d+)/);
-      if (bpmMatch) res.tempo = parseInt(bpmMatch[1], 10);
+    // Remove comments
+    const cleanStr = str.replace(/\/\/.*$/gm, '');
+
+    // Parse composition
+    const compMatch = cleanStr.match(/composition\s*\{([^}]*)\}/);
+    if (compMatch) {
+      const bpmMatch = compMatch[1].match(/bpm:\s*(\d+)/);
+      if (bpmMatch) res.bpm = parseInt(bpmMatch[1], 10);
     }
 
-    const sectionsMatch = str.matchAll(/section\s+(\w+)\s*\{([^}]*)\}/g);
+    // Parse sections
+    const sectionsMatch = cleanStr.matchAll(/section\s+(\w+)\s*\{([^}]*)\}/g);
     for (const match of sectionsMatch) {
+      const sectionName = match[1];
       const sectionContent = match[2];
+      const section: Section = { length: 4, tracks: {} };
+
+      const lenMatch = sectionContent.match(/length:\s*(\d+)/);
+      if (lenMatch) section.length = parseInt(lenMatch[1], 10);
+
       const tracksMatch = sectionContent.matchAll(/track\s+(\w+)\s*\{([^}]*)\}/g);
       for (const tMatch of tracksMatch) {
         const trackName = tMatch[1];
         const trackContent = tMatch[2];
+        const track: Track = { instrument: '', pattern: '' };
 
-        res.layers.push(trackName);
+        const instMatch = trackContent.match(/instrument:\s*["']?(\w+)["']?/);
+        if (instMatch) track.instrument = instMatch[1];
 
-        const patMatch = trackContent.match(/pattern:\s*(".*"|\[.*\])/);
+        const patMatch = trackContent.match(/pattern:\s*(["'][\d]+["']|\[[^\]]*\])/);
         if (patMatch) {
-          let val = patMatch[1];
-          if (val.startsWith('"')) {
-             res.patterns[trackName] = val.slice(1, -1);
+          const val = patMatch[1].trim();
+          if (val.startsWith('"') || val.startsWith("'")) {
+            track.pattern = val.slice(1, -1);
           } else {
-             try {
-               res.melody = JSON.parse(val.replace(/'/g, '"'));
-             } catch (e) {}
+            try {
+              // Handle identifiers in array like [C3, _, Eb3]
+              const arrayContent = val.slice(1, -1);
+              track.pattern = arrayContent.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+            } catch (e) {}
           }
         }
+        section.tracks[trackName] = track;
       }
+      res.sections[sectionName] = section;
+    }
+
+    // Parse timeline
+    const timelineMatch = cleanStr.match(/timeline:\s*\[([^\]]*)\]/);
+    if (timelineMatch) {
+      res.timeline = timelineMatch[1].split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
     }
 
     return res;
@@ -117,140 +177,277 @@ const BeatScriptApp: React.FC = () => {
 
     await Tone.start();
     const beat = parseBeatScript(script);
-    const tempo = beat.tempo || 120;
-    setBpm(tempo);
-    Tone.Transport.bpm.value = tempo;
+    setBpm(beat.bpm);
+    Tone.Transport.bpm.value = beat.bpm;
 
-    const layers = beat.layers || [];
-    const patterns = beat.patterns || {};
-    const melody = beat.melody || [];
+    if (beat.timeline.length === 0) return;
 
-    const sequence = new Tone.Sequence((time, step) => {
-      layers.forEach(layer => {
-        const pattern = patterns[layer];
+    // Build the performance schedule
+    let currentTime = 0;
+    beat.timeline.forEach(sectionName => {
+      const section = beat.sections[sectionName];
+      if (!section) return;
 
-        if (pattern) {
-          const hit = pattern[step % pattern.length];
-          if (hit === '1') {
-            const synth = layer === 'kick' ? synths.current.kick :
-                          layer === 'snare' ? synths.current.snare :
-                          synths.current.hihat;
-            synth.triggerAttackRelease(layer === 'kick' ? 'C1' : 'C2', "16n", time);
+      Object.entries(section.tracks).forEach(([_, track]) => {
+        const synth = synths.current[track.instrument];
+        if (!synth) return;
+
+        if (typeof track.pattern === 'string') {
+          // Rhythmic pattern
+          for (let i = 0; i < track.pattern.length; i++) {
+            if (track.pattern[i] === '1') {
+              const time = `+${currentTime}m + ${i / 4}n`;
+              synth.triggerAttackRelease(track.instrument.includes('kick') ? 'C1' : 'C2', "16n", time);
+            }
           }
-        } else if (layer === 'lead') {
-          const note = melody[Math.floor(step / 2) % melody.length];
-          if (note) {
-            synths.current.lead.triggerAttackRelease(note, "16n", time);
-          }
+        } else if (Array.isArray(track.pattern)) {
+          // Melodic pattern
+          track.pattern.forEach((note, i) => {
+            if (note !== '_') {
+              const time = `+${currentTime}m + ${i / 4}n`;
+              synth.triggerAttackRelease(note, "16n", time);
+            }
+          });
         }
       });
-    }, Array.from({ length: 16 }, (_, i) => i), "16n");
+      currentTime += section.length;
+    });
 
-    sequence.start(0);
     Tone.Transport.start();
     setIsPlaying(true);
   };
 
+  const updateProjection = (line: string) => {
+    if (line.includes('bpm:')) {
+      const val = parseInt(line.split(':')[1].trim(), 10);
+      setProjection({ type: 'knob', label: 'Tempo', value: val, min: 40, max: 240 });
+    } else if (line.includes('frequency:')) {
+      const val = parseFloat(line.split(':')[1].trim());
+      setProjection({ type: 'knob', label: 'Frequency', value: val, min: 20, max: 200 });
+    } else if (line.includes('pattern:')) {
+      setProjection({ type: 'pattern', label: 'Pattern Editor' });
+    } else {
+      setProjection(null);
+    }
+  };
+
+  const handleEditorChange = (value: string | undefined) => {
+    setScript(value || '');
+  };
+
+  const handleDownload = () => {
+    const element = document.createElement("a");
+    const file = new Blob([script], {type: 'text/plain'});
+    element.href = URL.createObjectURL(file);
+    element.download = "composition.beat";
+    document.body.appendChild(element);
+    element.click();
+  };
+
   return (
-    <div className="flex flex-col h-screen w-screen bg-beatscript-black text-white font-sans">
+    <div className="flex flex-col h-screen w-screen bg-beatscript-black text-white font-sans overflow-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 bg-beatscript-gray border-b border-white/10">
+      <header className="flex items-center justify-between px-6 py-4 bg-beatscript-gray border-b border-white/10 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="bg-beatscript-purple p-2 rounded-lg">
+          <div className="bg-beatscript-purple p-2 rounded-lg shadow-lg shadow-purple-500/20">
             <Music size={24} />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">BeatScript <span className="text-beatscript-purple italic">v12</span></h1>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight leading-none">BeatScript <span className="text-beatscript-purple italic">v12</span></h1>
+            <span className="text-[10px] text-gray-500 font-mono">WEB_CORE_ACTIVE</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <Activity size={16} className="text-green-500" />
-            <span>Engine: Tone.js (Web)</span>
+          <div className="hidden md:flex items-center gap-2 text-sm text-gray-400">
+            <Activity size={16} className={isPlaying ? "text-green-500 animate-pulse" : "text-gray-600"} />
+            <span>Tone.js Engine</span>
           </div>
-          <div className="flex items-center gap-2 text-sm text-gray-400 font-mono bg-black/40 px-3 py-1 rounded border border-white/5">
-            <span>BPM: {bpm}</span>
+          <div className="flex items-center gap-2 text-sm text-gray-400 font-mono bg-black/40 px-3 py-1.5 rounded-md border border-white/5">
+            <span className="text-[10px] text-beatscript-purple">BPM</span>
+            <span className="min-w-[2ch]">{bpm}</span>
           </div>
-          <button
-            onClick={handleTogglePlay}
-            className={`flex items-center gap-2 px-6 py-2 rounded-full font-semibold transition-all ${
-              isPlaying
-                ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-beatscript-purple hover:bg-purple-600'
-            }`}
-          >
-            {isPlaying ? <Square size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-            {isPlaying ? 'STOP' : 'PLAY'}
-          </button>
+          <div className="flex gap-2">
+             <button
+                onClick={() => {
+                  navigator.clipboard.writeText(script);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="p-2.5 rounded-full bg-beatscript-gray hover:bg-gray-800 border border-white/10 transition-colors text-gray-400 hover:text-white"
+                title="Copy to clipboard"
+              >
+                {copied ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
+              </button>
+             <button
+                onClick={handleDownload}
+                className="p-2.5 rounded-full bg-beatscript-gray hover:bg-gray-800 border border-white/10 transition-colors text-gray-400 hover:text-white"
+                title="Download .beat file"
+              >
+                <Download size={18} />
+              </button>
+             <button
+                onClick={handleTogglePlay}
+                className={`flex items-center gap-2 px-8 py-2.5 rounded-full font-bold transition-all shadow-xl ${
+                  isPlaying
+                    ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20'
+                    : 'bg-beatscript-purple hover:bg-purple-600 shadow-purple-500/30'
+                }`}
+              >
+                {isPlaying ? <Square size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+                {isPlaying ? 'STOP' : 'PLAY'}
+              </button>
+          </div>
         </div>
       </header>
 
       <main className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className="w-16 bg-beatscript-gray border-r border-white/10 flex flex-col items-center py-6 gap-8 shrink-0">
+           <BookOpen className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" size={24} />
+           <Cpu className="text-beatscript-purple cursor-pointer transition-colors" size={24} />
+           <Settings className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" size={24} />
+           <div className="mt-auto mb-2 text-[10px] font-bold text-gray-600 -rotate-90 origin-center whitespace-nowrap">STUDIO MODE</div>
+        </div>
+
         {/* Editor Area */}
-        <div className="flex-1 flex flex-col border-r border-white/10">
-          <div className="flex items-center gap-2 px-4 py-2 bg-black/20 text-xs font-mono text-gray-500 border-b border-white/5">
-            <Cpu size={14} />
-            <span>main.beat</span>
+        <div className="flex-1 flex flex-col bg-beatscript-black">
+          <div className="flex items-center justify-between px-4 py-2.5 bg-black/40 text-xs font-mono text-gray-400 border-b border-white/5">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-beatscript-purple" />
+              <span>main.beat</span>
+            </div>
+            <div className="flex gap-4">
+              <span>Ln {cursorPos.lineNumber}, Col {cursorPos.column}</span>
+              <span>UTF-8</span>
+            </div>
           </div>
-          <Editor
-            height="100%"
-            defaultLanguage="javascript"
-            theme="vs-dark"
-            value={script}
-            onChange={(v) => setScript(v || '')}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 14,
-              lineNumbers: 'on',
-              glyphMargin: false,
-              folding: false,
-              lineDecorationsWidth: 0,
-              lineNumbersMinChars: 3,
-              fontFamily: 'JetBrains Mono, Menlo, Monaco, Courier New, monospace',
-              padding: { top: 20 }
-            }}
-          />
+          <div className="flex-1 relative">
+            <Editor
+              height="100%"
+              defaultLanguage="javascript"
+              theme="vs-dark"
+              value={script}
+              onChange={handleEditorChange}
+              onMount={(editor) => {
+                editor.onDidChangeCursorPosition((e) => {
+                  setCursorPos({ lineNumber: e.position.lineNumber, column: e.position.column });
+                  const line = editor.getModel()?.getLineContent(e.position.lineNumber) || '';
+                  updateProjection(line);
+                });
+              }}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 15,
+                lineNumbers: 'on',
+                glyphMargin: false,
+                folding: true,
+                lineDecorationsWidth: 0,
+                lineNumbersMinChars: 3,
+                fontFamily: 'JetBrains Mono, Menlo, Monaco, Courier New, monospace',
+                padding: { top: 20 },
+                scrollBeyondLastLine: false,
+                smoothScrolling: true,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on'
+              }}
+            />
+          </div>
         </div>
 
         {/* Projection Area */}
-        <div className="w-96 bg-beatscript-gray flex flex-col p-6 gap-6">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2">
-              <Zap size={14} className="text-yellow-500" />
-              Projection
-            </h2>
-            <p className="text-xs text-gray-400 italic">Reactive UI based on cursor position</p>
-          </div>
-
-          <div className="flex-1 bg-black/40 rounded-xl border border-white/5 flex items-center justify-center text-center p-8">
-            <div className="flex flex-col gap-4 opacity-40">
-              <Activity size={48} className="mx-auto" />
-              <p className="text-sm">Select a part of your code to see its parameters projected here.</p>
+        <div className="w-[400px] bg-beatscript-gray flex flex-col border-l border-white/10 shrink-0">
+          <div className="p-6 flex flex-col gap-8 flex-1 overflow-y-auto">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-xs font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Zap size={14} className="text-yellow-500 fill-yellow-500" />
+                Projection
+              </h2>
+              <p className="text-[10px] text-gray-600 font-medium">REAL-TIME PARAMETER MAPPING</p>
             </div>
+
+            {projection ? (
+              <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-500">
+                <div className="bg-black/40 rounded-2xl border border-white/5 p-6 flex flex-col gap-6 shadow-2xl">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-bold text-gray-300">{projection.label}</span>
+                    <span className="text-xs font-mono text-beatscript-purple bg-beatscript-purple/10 px-2 py-0.5 rounded">{projection.value}</span>
+                  </div>
+
+                  {projection.type === 'knob' && (
+                    <div className="flex flex-col gap-4">
+                       <input
+                         type="range"
+                         className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                         min={projection.min}
+                         max={projection.max}
+                         value={projection.value}
+                         onChange={() => {}} // In a real app, this would update the editor text
+                       />
+                       <div className="flex justify-between text-[10px] text-gray-600 font-mono">
+                         <span>{projection.min}</span>
+                         <span>{projection.max}</span>
+                       </div>
+                    </div>
+                  )}
+
+                  {projection.type === 'pattern' && (
+                    <div className="grid grid-cols-8 gap-2">
+                      {new Array(16).fill(0).map((_, i) => (
+                        <div key={i} className="aspect-square bg-gray-800 rounded border border-white/5 hover:bg-beatscript-purple/40 cursor-pointer transition-colors" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center p-8">
+                <div className="flex flex-col gap-4 opacity-20">
+                  <Activity size={64} className="mx-auto" />
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs font-bold uppercase tracking-wider">Awaiting Input</p>
+                    <p className="text-[10px]">Select a code block to project its interface.</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Visualization placeholder */}
-          <div className="h-32 bg-black/20 rounded-xl border border-white/5 p-4 flex items-end gap-1">
-             {Array.from({length: 24}).map((_, i) => (
-               <div
-                 key={i}
-                 className={`flex-1 rounded-t-sm transition-all duration-300 ${isPlaying ? 'bg-beatscript-purple' : 'bg-gray-700'}`}
-                 style={{
-                   height: isPlaying ? `${Math.random() * 80 + 20}%` : '10%',
-                   opacity: isPlaying ? 0.6 + (Math.random() * 0.4) : 0.3
-                 }}
-               />
-             ))}
+          {/* Visualization area */}
+          <div className="p-6 border-t border-white/10 bg-black/20">
+             <div className="flex items-center justify-between mb-4">
+               <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Master Output</span>
+               <div className="flex gap-1">
+                  <div className={`w-1 h-1 rounded-full ${isPlaying ? 'bg-green-500 shadow-lg shadow-green-500/50' : 'bg-gray-700'}`} />
+                  <div className={`w-1 h-1 rounded-full ${isPlaying ? 'bg-green-500' : 'bg-gray-700'}`} />
+               </div>
+             </div>
+             <div className="h-24 flex items-end gap-[2px]">
+                {visualizerData.map((val, i) => (
+                  <div
+                    key={i}
+                    className={`flex-1 rounded-t-[1px] transition-all duration-75 ${isPlaying ? 'bg-gradient-to-t from-beatscript-purple to-purple-400' : 'bg-gray-800/50'}`}
+                    style={{
+                      height: `${Math.max(4, val)}%`,
+                      opacity: isPlaying ? 0.4 + (val / 150) : 0.2
+                    }}
+                  />
+                ))}
+             </div>
           </div>
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="px-6 py-2 bg-beatscript-gray border-t border-white/10 text-[10px] text-gray-500 flex justify-between">
-        <div>BEATSCRIPT CORE v12.0.4-LATEST</div>
-        <div className="flex gap-4">
-          <span className="hover:text-gray-300 cursor-pointer transition-colors">DOCUMENTATION</span>
-          <span className="hover:text-gray-300 cursor-pointer transition-colors">SETTINGS</span>
-          <span className="text-beatscript-purple hover:underline cursor-pointer">GEMINI-POWERED CO-PILOT ACTIVE</span>
+      <footer className="px-6 py-2 bg-beatscript-gray border-t border-white/10 text-[9px] text-gray-600 font-bold tracking-widest flex justify-between shrink-0">
+        <div className="flex gap-6">
+           <span>BEATSCRIPT CORE v12.4.0</span>
+           <span className="text-green-900">SYSTEM_READY</span>
+        </div>
+        <div className="flex gap-6">
+          <span className="hover:text-beatscript-purple cursor-pointer transition-colors uppercase">Documentation</span>
+          <span className="hover:text-beatscript-purple cursor-pointer transition-colors uppercase">Open Source</span>
+          <span className="text-beatscript-purple/80 italic font-medium tracking-normal">Propelled by Gemini Intelligence</span>
         </div>
       </footer>
     </div>
