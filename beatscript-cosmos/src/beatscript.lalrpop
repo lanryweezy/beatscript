@@ -1,6 +1,7 @@
-// LALRPOP Grammar for a compilable BeatScript
+// LALRPOP Grammar for a more expressive BeatScript
 
-use crate::lang::{self, TopLevelItem, SectionItem, TrackItem};
+use crate::lang::{self, TopLevelItem, SectionItem, TrackItem, Value};
+use std::collections::HashMap;
 
 grammar;
 
@@ -10,40 +11,84 @@ pub Project: lang::Project = {
         let mut proj = lang::Project::default();
         for item in items {
             match item {
+                TopLevelItem::Composition(c) => proj.composition = Some(c),
                 TopLevelItem::Timeline(t) => proj.timeline = t,
                 TopLevelItem::Section(s) => proj.sections.push(s),
                 TopLevelItem::Synth(s) => proj.synths.push(s),
+                TopLevelItem::FxChain(f) => proj.fx_chains.push(f),
             }
         }
         proj
     }
 };
 
-// An item at the top level of the file
 TopLevelItem: TopLevelItem = {
+    <c:Composition> => TopLevelItem::Composition(c),
     <t:Timeline> => TopLevelItem::Timeline(t),
     <s:Section> => TopLevelItem::Section(s),
     <sy:Synth> => TopLevelItem::Synth(sy),
+    <f:FxChain> => TopLevelItem::FxChain(f),
 };
 
-// This enum is conceptual - LALRPOP generates it from the rules above.
-// enum TopLevelItem {
-//     Timeline(Vec<String>),
-//     Section(lang::Section),
-//     Synth(lang::Synth),
-// }
+Composition: lang::Composition = {
+    "composition" "{" <items:CompositionItem*> "}" => {
+        let mut comp = lang::Composition::default();
+        for (k, v) in items {
+            match k.as_str() {
+                "title" => if let Value::String(s) = v { comp.title = s },
+                "artist" => if let Value::String(s) = v { comp.artist = s },
+                "key" => if let Value::String(s) = v { comp.key = s },
+                "bpm" => if let Value::Integer(i) = v { comp.bpm = i as u32 },
+                _ => {}
+            }
+        }
+        comp
+    }
+};
 
-// `timeline: [verse, chorus]`
+CompositionItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> => (k, v),
+};
+
 Timeline: Vec<String> = {
     "timeline" ":" "[" <v:Comma<Identifier>> "]" => v,
 };
 
-// `synth my_synth {}`
 Synth: lang::Synth = {
-    "synth" <name:Identifier> "{" "}" => lang::Synth { name, ..Default::default() },
+    "synth" <name:Identifier> "{" <items:SynthItem*> "}" => {
+        let mut synth = lang::Synth { name, ..Default::default() };
+        for (k, v) in items {
+            match k.as_str() {
+                "type" => if let Value::String(s) = v { synth.synth_type = s },
+                _ => { synth.parameters.insert(k, v); }
+            }
+        }
+        synth
+    }
 };
 
-// `section verse { ... }`
+SynthItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> => (k, v),
+};
+
+FxChain: lang::FxChain = {
+    "fx_chain" <name:Identifier> "{" <effects:Effect*> "}" => lang::FxChain { name, effects },
+};
+
+Effect: lang::Effect = {
+    <t:Identifier> "{" <items:EffectItem*> "}" => {
+        let mut eff = lang::Effect { effect_type: t, ..Default::default() };
+        for (k, v) in items {
+            eff.parameters.insert(k, v);
+        }
+        eff
+    }
+};
+
+EffectItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> => (k, v),
+};
+
 Section: lang::Section = {
     "section" <name:Identifier> "{" <items:SectionItem*> "}" => {
         let mut sec = lang::Section { name, ..Default::default() };
@@ -62,20 +107,14 @@ SectionItem: SectionItem = {
     <t:Track> => SectionItem::Track(t),
 };
 
-// This enum is conceptual.
-// enum SectionItem {
-//     Length(u32),
-//     Track(lang::Track),
-// }
-
-// `track kick { instrument: "kick_synth", pattern: ... }`
 Track: lang::Track = {
     "track" <name:Identifier> "{" <items:TrackItem*> "}" => {
-        let mut track = lang::Track { name, instrument: String::new(), pattern: lang::Pattern::Notes(vec![]) };
+        let mut track = lang::Track { name, ..Default::default() };
         for item in items {
             match item {
                 TrackItem::Instrument(i) => track.instrument = i,
                 TrackItem::Pattern(p) => track.pattern = p,
+                TrackItem::Send(s) => track.sends.push(s),
             }
         }
         track
@@ -83,25 +122,51 @@ Track: lang::Track = {
 };
 
 TrackItem: TrackItem = {
-    "instrument" ":" <i:String> => TrackItem::Instrument(i),
+    "instrument" ":" <i:Identifier> => TrackItem::Instrument(i),
     "pattern" ":" <p:Pattern> => TrackItem::Pattern(p),
+    "send" ":" "{" <s:SendItem> "}" => TrackItem::Send(s),
 };
 
-// This enum is conceptual.
-// enum TrackItem {
-//     Instrument(String),
-//     Pattern(lang::Pattern),
-// }
+SendItem: lang::SendEffect = {
+    "to" ":" <to:String> "," "amount" ":" <amount:Float> => lang::SendEffect { to, amount },
+};
 
 Pattern: lang::Pattern = {
     "euclid" "(" <h:Integer> "," <s:Integer> ")" => lang::Pattern::Euclidean { hits: h as u8, steps: s as u8 },
+    "[" <v:Comma<PatternStep>> "]" => lang::Pattern::Notes(v.into_iter().enumerate().filter_map(|(i, step)| {
+        step.map(|note| lang::NoteEvent {
+            time_steps: i as u32,
+            notes: vec![note],
+            velocity: 100,
+            duration_steps: 1,
+        })
+    }).collect()),
+};
+
+PatternStep: Option<String> = {
+    "_" => None,
+    <n:Identifier> => Some(n),
+};
+
+Literal: lang::Value = {
+    <f:Float> => Value::Float(f),
+    <i:Integer> => Value::Integer(i),
+    <s:String> => Value::String(s),
+    "{" <items:Comma<CompositionItem>> "}" => {
+        let mut map = HashMap::new();
+        for (k, v) in items {
+            map.insert(k, v);
+        }
+        Value::Object(map)
+    }
 };
 
 // --- Terminals ---
 
 Identifier: String = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s.to_string();
-String: String = <s:r#""([^"\\]|\\.)*""#> => s.to_string();
+String: String = <s:r#""([^"\\]|\\.)*""#> => s[1..s.len()-1].to_string();
 Integer: i64 = <s:r"[0-9]+"> => s.parse().unwrap();
+Float: f32 = <s:r"[0-9]+\.[0-9]*"> => s.parse().unwrap();
 
 // Comma separated list helper
 Comma<T>: Vec<T> = {
