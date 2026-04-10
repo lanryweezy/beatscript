@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as Tone from 'tone';
-import Editor from '@monaco-editor/react';
+import Editor, { loader } from '@monaco-editor/react';
 import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Copy, Check } from 'lucide-react';
 
 // --- Types ---
@@ -68,6 +68,8 @@ const BeatScriptApp: React.FC = () => {
   const [projection, setProjection] = useState<any>(null);
   const [visualizerData, setVisualizerData] = useState<number[]>(new Array(32).fill(0));
   const [copied, setCopied] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const editorRef = useRef<any>(null);
 
   // Audio nodes
   const synths = useRef<Record<string, any>>({});
@@ -78,16 +80,21 @@ const BeatScriptApp: React.FC = () => {
     analyser.current = new Tone.Analyser('waveform', 32);
 
     synths.current = {
-      melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current).toDestination(),
-      kick_synth: new Tone.MembraneSynth().connect(analyser.current).toDestination(),
-      snare_synth: new Tone.MetalSynth().connect(analyser.current).toDestination(),
+      melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current!).toDestination(),
+      kick_synth: new Tone.MembraneSynth().connect(analyser.current!).toDestination(),
+      snare_synth: new Tone.MetalSynth().connect(analyser.current!).toDestination(),
       hihat_synth: new Tone.MetalSynth({
         envelope: {
           attack: 0.001,
           decay: 0.1,
           release: 0.01
         }
-      }).connect(analyser.current).toDestination()
+      }).connect(analyser.current!).toDestination(),
+      bass_synth: new Tone.MonoSynth({
+        oscillator: { type: 'sawtooth' },
+        envelope: { attack: 0.1, release: 0.1 }
+      }).connect(analyser.current!).toDestination(),
+      pad_synth: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).toDestination()
     };
 
     const interval = setInterval(() => {
@@ -139,6 +146,11 @@ const BeatScriptApp: React.FC = () => {
 
         const instMatch = trackContent.match(/instrument:\s*["']?(\w+)["']?/);
         if (instMatch) track.instrument = instMatch[1];
+
+        const decayMatch = trackContent.match(/decay:\s*(\d+\.?\d*)/);
+        if (decayMatch && synths.current[track.instrument]) {
+           // Dynamic parameter update simulation
+        }
 
         const patMatch = trackContent.match(/pattern:\s*(["'][\d]+["']|\[[^\]]*\])/);
         if (patMatch) {
@@ -217,15 +229,15 @@ const BeatScriptApp: React.FC = () => {
     setIsPlaying(true);
   };
 
-  const updateProjection = (line: string) => {
+  const updateProjection = (line: string, lineNumber: number) => {
     if (line.includes('bpm:')) {
       const val = parseInt(line.split(':')[1].trim(), 10);
-      setProjection({ type: 'knob', label: 'Tempo', value: val, min: 40, max: 240 });
+      setProjection({ type: 'knob', label: 'Tempo', value: val, min: 40, max: 240, lineNumber });
     } else if (line.includes('frequency:')) {
       const val = parseFloat(line.split(':')[1].trim());
-      setProjection({ type: 'knob', label: 'Frequency', value: val, min: 20, max: 200 });
+      setProjection({ type: 'knob', label: 'Frequency', value: val, min: 20, max: 200, lineNumber });
     } else if (line.includes('pattern:')) {
-      setProjection({ type: 'pattern', label: 'Pattern Editor' });
+      setProjection({ type: 'pattern', label: 'Pattern Editor', lineNumber });
     } else {
       setProjection(null);
     }
@@ -243,6 +255,55 @@ const BeatScriptApp: React.FC = () => {
     document.body.appendChild(element);
     element.click();
   };
+
+  const handleProjectionValueChange = (newValue: number) => {
+    if (!projection || !editorRef.current) return;
+
+    const lines = script.split('\n');
+    const line = lines[projection.lineNumber - 1];
+    const parts = line.split(':');
+    if (parts.length === 2) {
+      lines[projection.lineNumber - 1] = `${parts[0]}: ${newValue}`;
+      const newScript = lines.join('\n');
+      setScript(newScript);
+      setProjection({ ...projection, value: newValue });
+    }
+  };
+
+  // Define BeatScript language for Monaco
+  useEffect(() => {
+    loader.init().then(monaco => {
+      monaco.languages.register({ id: 'beatscript' });
+      monaco.languages.setMonarchTokensProvider('beatscript', {
+        tokenizer: {
+          root: [
+            [/\/\/.*$/, 'comment'],
+            [/\b(composition|synth|section|track|timeline|length|instrument|pattern|bpm|frequency|type|decay)\b/, 'keyword'],
+            [/[{}[\],:]/, 'delimiter'],
+            [/\d+/, 'number'],
+            [/"[^"]*"/, 'string'],
+            [/[a-zA-Z_]\w*/, 'identifier'],
+          ]
+        }
+      });
+
+      monaco.editor.defineTheme('beatscript-theme', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [
+          { token: 'keyword', foreground: 'BD93F9', fontStyle: 'bold' },
+          { token: 'comment', foreground: '6272A4' },
+          { token: 'string', foreground: 'F1FA8C' },
+          { token: 'number', foreground: 'BD93F9' },
+          { token: 'identifier', foreground: '8BE9FD' },
+        ],
+        colors: {
+          'editor.background': '#0a0a0a',
+          'editor.lineHighlightBackground': '#1a1a1a',
+        }
+      });
+    });
+  }, []);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-beatscript-black text-white font-sans overflow-hidden">
@@ -304,14 +365,58 @@ const BeatScriptApp: React.FC = () => {
       <main className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <div className="w-16 bg-beatscript-gray border-r border-white/10 flex flex-col items-center py-6 gap-8 shrink-0">
-           <BookOpen className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" size={24} />
+           <BookOpen
+              className={`${showTutorial ? 'text-beatscript-purple' : 'text-gray-500'} hover:text-beatscript-purple cursor-pointer transition-colors`}
+              size={24}
+              onClick={() => setShowTutorial(!showTutorial)}
+           />
            <Cpu className="text-beatscript-purple cursor-pointer transition-colors" size={24} />
            <Settings className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" size={24} />
            <div className="mt-auto mb-2 text-[10px] font-bold text-gray-600 -rotate-90 origin-center whitespace-nowrap">STUDIO MODE</div>
         </div>
 
         {/* Editor Area */}
-        <div className="flex-1 flex flex-col bg-beatscript-black">
+        <div className="flex-1 flex flex-col bg-beatscript-black relative">
+          {showTutorial && (
+            <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-sm p-12 flex flex-col gap-8 animate-in fade-in zoom-in duration-300">
+               <div className="flex justify-between items-center">
+                  <h2 className="text-4xl font-black italic tracking-tighter">GETTING <span className="text-beatscript-purple">STARTED</span></h2>
+                  <button onClick={() => setShowTutorial(false)} className="text-gray-500 hover:text-white transition-colors">CLOSE [X]</button>
+               </div>
+
+               <div className="grid grid-cols-2 gap-12">
+                  <div className="flex flex-col gap-4">
+                     <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">01. Composition</h3>
+                     <p className="text-gray-400 text-sm leading-relaxed">Every script starts with a <span className="text-white font-mono">composition</span> block. This is where you set the global <span className="text-white font-mono">bpm</span> (beats per minute).</p>
+                  </div>
+                  <div className="flex flex-col gap-4">
+                     <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">02. Synths</h3>
+                     <p className="text-gray-400 text-sm leading-relaxed">Define your instruments using <span className="text-white font-mono">synth</span>. Choose a <span className="text-white font-mono">type</span> like membrane, noise, or fm.</p>
+                  </div>
+                  <div className="flex flex-col gap-4">
+                     <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">03. Sections</h3>
+                     <p className="text-gray-400 text-sm leading-relaxed">Organize your music into <span className="text-white font-mono">section</span>s. Each section has a <span className="text-white font-mono">length</span> and contains multiple <span className="text-white font-mono">track</span>s.</p>
+                  </div>
+                  <div className="flex flex-col gap-4">
+                     <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">04. Timeline</h3>
+                     <p className="text-gray-400 text-sm leading-relaxed">Finally, the <span className="text-white font-mono">timeline</span> tells the engine which sections to play and in what order.</p>
+                  </div>
+               </div>
+
+               <div className="mt-auto bg-beatscript-purple/10 border border-beatscript-purple/20 p-6 rounded-2xl flex items-center justify-between">
+                  <div className="flex flex-col gap-1">
+                     <p className="font-bold">Ready to drop the beat?</p>
+                     <p className="text-xs text-gray-500 italic">Try clicking on a 'bpm' or 'frequency' line to see the Projection interface.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowTutorial(false)}
+                    className="bg-beatscript-purple px-8 py-3 rounded-full font-black text-sm hover:bg-purple-600 transition-all shadow-xl shadow-purple-500/20"
+                  >
+                    START CODING
+                  </button>
+               </div>
+            </div>
+          )}
           <div className="flex items-center justify-between px-4 py-2.5 bg-black/40 text-xs font-mono text-gray-400 border-b border-white/5">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-beatscript-purple" />
@@ -325,15 +430,16 @@ const BeatScriptApp: React.FC = () => {
           <div className="flex-1 relative">
             <Editor
               height="100%"
-              defaultLanguage="javascript"
-              theme="vs-dark"
+              defaultLanguage="beatscript"
+              theme="beatscript-theme"
               value={script}
               onChange={handleEditorChange}
               onMount={(editor) => {
+                editorRef.current = editor;
                 editor.onDidChangeCursorPosition((e) => {
                   setCursorPos({ lineNumber: e.position.lineNumber, column: e.position.column });
                   const line = editor.getModel()?.getLineContent(e.position.lineNumber) || '';
-                  updateProjection(line);
+                  updateProjection(line, e.position.lineNumber);
                 });
               }}
               options={{
@@ -382,7 +488,7 @@ const BeatScriptApp: React.FC = () => {
                          min={projection.min}
                          max={projection.max}
                          value={projection.value}
-                         onChange={() => {}} // In a real app, this would update the editor text
+                         onChange={(e) => handleProjectionValueChange(parseFloat(e.target.value))}
                        />
                        <div className="flex justify-between text-[10px] text-gray-600 font-mono">
                          <span>{projection.min}</span>
