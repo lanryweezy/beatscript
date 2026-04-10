@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as Tone from 'tone';
 import Editor, { loader } from '@monaco-editor/react';
-import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Copy, Check } from 'lucide-react';
+import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Copy, Check, Sparkles } from 'lucide-react';
 
 // --- Types ---
 interface BeatScript {
@@ -21,8 +21,9 @@ interface Track {
   pattern: string | string[];
 }
 
-// --- Constants ---
-const DEFAULT_SCRIPT = `composition {
+// --- Presets ---
+const PRESETS = {
+  "Neon Sunset": `composition {
   title: "Neon Sunset",
   bpm: 95
 }
@@ -57,8 +58,43 @@ section main {
   }
 }
 
-timeline: ["main"]
-`;
+timeline: ["main"]`,
+  "Deep Techno": `composition {
+  title: "Deep Techno",
+  bpm: 128
+}
+
+synth kick { type: "membrane", frequency: 45 }
+synth clap { type: "noise", decay: 0.2 }
+synth bass { type: "mono", frequency: 80 }
+
+section loop {
+  length: 4
+  track bd { instrument: "kick", pattern: "1000100010001000" }
+  track cp { instrument: "clap", pattern: "0000100000001000" }
+  track bs { instrument: "bass", pattern: "1010010010100101" }
+}
+
+timeline: ["loop", "loop"]`,
+  "Ambient Clouds": `composition {
+  title: "Ambient Clouds",
+  bpm: 60
+}
+
+synth pad { type: "fm", frequency: 440 }
+
+section atmosphere {
+  length: 8
+  track pad_layer {
+    instrument: "pad",
+    pattern: ["C3", "_", "G3", "_", "Bb3", "_", "F3", "_"]
+  }
+}
+
+timeline: ["atmosphere"]`
+};
+
+const DEFAULT_SCRIPT = PRESETS["Neon Sunset"];
 
 const BeatScriptApp: React.FC = () => {
   const [script, setScript] = useState(DEFAULT_SCRIPT);
@@ -94,7 +130,11 @@ const BeatScriptApp: React.FC = () => {
         oscillator: { type: 'sawtooth' },
         envelope: { attack: 0.1, release: 0.1 }
       }).connect(analyser.current!).toDestination(),
-      pad_synth: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).toDestination()
+      pad_synth: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).toDestination(),
+      kick: new Tone.MembraneSynth().connect(analyser.current!).toDestination(),
+      clap: new Tone.MetalSynth({ envelope: { decay: 0.2 } }).connect(analyser.current!).toDestination(),
+      bass: new Tone.MonoSynth().connect(analyser.current!).toDestination(),
+      pad: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).toDestination()
     };
 
     const interval = setInterval(() => {
@@ -270,6 +310,10 @@ const BeatScriptApp: React.FC = () => {
     }
   };
 
+  const handlePresetChange = (name: string) => {
+    setScript(PRESETS[name as keyof typeof PRESETS]);
+  };
+
   // Define BeatScript language for Monaco
   useEffect(() => {
     loader.init().then(monaco => {
@@ -320,6 +364,19 @@ const BeatScriptApp: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-6">
+          {/* Preset Selector */}
+          <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-md border border-white/5">
+             <Sparkles size={14} className="text-beatscript-purple" />
+             <select
+               onChange={(e) => handlePresetChange(e.target.value)}
+               className="bg-transparent text-xs font-bold uppercase tracking-wider focus:outline-none cursor-pointer"
+             >
+                {Object.keys(PRESETS).map(name => (
+                  <option key={name} value={name} className="bg-beatscript-gray">{name}</option>
+                ))}
+             </select>
+          </div>
+
           <div className="hidden md:flex items-center gap-2 text-sm text-gray-400">
             <Activity size={16} className={isPlaying ? "text-green-500 animate-pulse" : "text-gray-600"} />
             <span>Tone.js Engine</span>
