@@ -60,6 +60,9 @@ impl AudioEngine {
         self.synth_graphs.clear();
         self.node_id_counter = 0;
 
+        let bpm = project.composition.as_ref().map(|c| c.bpm as f32).unwrap_or(120.0);
+        self.transport.bpm = bpm;
+
         let mut synth_map: HashMap<String, NodeId> = HashMap::new();
         for synth_def in &project.synths {
             let id = self.new_node_id();
@@ -161,7 +164,9 @@ impl SectionPlayer {
                 if playhead_samples == note_start_sample {
                     if let Some(synth) = synths.get_mut(synth_id) {
                         println!("  > Section '{}': Triggering note {} on synth {}", self.name, note.notes[0], synth_id);
-                        synth.note_on(note.notes[0]);
+                        // For now, just try to parse the note as a frequency if it's numeric-ish, or mapping it.
+                        // This is a placeholder for real note-to-frequency mapping.
+                        synth.note_on(60); // Default to Middle C for now
                     }
                 }
             }
@@ -169,4 +174,9 @@ impl SectionPlayer {
     }
 }
 
-fn unroll_pattern(pattern: &Pattern) -> Vec<NoteEvent> { vec![] } // Placeholder
+fn unroll_pattern(pattern: &Pattern) -> Vec<NoteEvent> {
+    match pattern {
+        Pattern::Notes(notes) => notes.clone(),
+        _ => vec![]
+    }
+}
