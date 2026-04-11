@@ -1,0 +1,38 @@
+// Ambient Space
+// Showcasing FX chains and long decays
+
+composition {
+    title: "Ambient Space",
+    artist: "Aethel",
+    bpm: 60
+}
+
+synth pad {
+    type: "subtractive",
+    osc1: "sine",
+    attack: 2.0,
+    release: 4.0
+}
+
+fx_chain deep_reverb {
+    reverb {
+        size: 0.95,
+        wet: 0.5
+    }
+    delay {
+        time: 0.75,
+        feedback: 0.6,
+        wet: 0.3
+    }
+}
+
+section clouds {
+    length: 8
+    track pad_track {
+        instrument: pad,
+        pattern: [C3, _, _, _, G3, _, _, _, Bb3, _, _, _, F3, _, _, _],
+        send: { to: "deep_reverb", amount: 0.8 }
+    }
+}
+
+timeline: [clouds]

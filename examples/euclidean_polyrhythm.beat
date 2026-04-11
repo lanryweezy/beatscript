@@ -1,0 +1,32 @@
+// Euclidean Experiment
+// Using the 'euclid' keyword for rhythmic generation
+
+composition {
+    title: "Euclidean Polyrhythm",
+    artist: "BeatScript AI",
+    bpm: 120
+}
+
+synth kick_synth {
+    type: "membrane",
+    frequency: 50.0
+}
+
+synth hihat_synth {
+    type: "noise",
+    decay: 0.05
+}
+
+section main {
+    length: 4
+    track kick {
+        instrument: kick_synth,
+        pattern: euclid(3, 8)
+    }
+    track hihat {
+        instrument: hihat_synth,
+        pattern: euclid(5, 8)
+    }
+}
+
+timeline: [main]
