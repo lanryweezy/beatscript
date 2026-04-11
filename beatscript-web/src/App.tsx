@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as Tone from 'tone';
 import MidiWriter from 'midi-writer-js';
 import Editor, { loader } from '@monaco-editor/react';
-import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Check, Sparkles, Circle, Share2, Palette, Volume2, VolumeX } from 'lucide-react';
+import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Check, Sparkles, Circle, Share2, Palette, Volume2, VolumeX, Save, FolderOpen, Trash2, Plus, ChevronLeft, ChevronRight, Dice5 } from 'lucide-react';
 
 // --- Types ---
 interface BeatScript {
@@ -24,6 +24,32 @@ interface Track {
 
 // --- Presets ---
 const PRESETS = {
+  "Lo-Fi Hip Hop": `composition {
+  title: "Lo-Fi Morning",
+  bpm: 88
+}
+
+synth keys {
+  type: "fm",
+  frequency: 220,
+  decay: 1.2
+}
+
+synth drums { type: "noise", decay: 0.05 }
+
+section groove {
+  length: 4
+  track electric_piano {
+    instrument: "keys",
+    pattern: ["C3", "Eb3", "G3", "Bb3", "D4", "F4", "G4", "_"]
+  }
+  track beats {
+    instrument: "drums",
+    pattern: "1000001010000010"
+  }
+}
+
+timeline: ["groove"]`,
   "Acid House": `composition {
   title: "Acid House",
   bpm: 124
@@ -177,8 +203,16 @@ const BeatScriptApp: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [showDocs, setShowDocs] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isProjectionCollapsed, setIsProjectionCollapsed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isSamplesLoaded, setIsSamplesLoaded] = useState(false);
+  const [projects, setProjects] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('beatscript_projects');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [theme, setTheme] = useState<keyof typeof THEMES>("Default");
   const editorRef = useRef<any>(null);
 
@@ -188,6 +222,8 @@ const BeatScriptApp: React.FC = () => {
   const recorder = useRef<Tone.Recorder | null>(null);
   const reverb = useRef<Tone.Reverb | null>(null);
   const delay = useRef<Tone.FeedbackDelay | null>(null);
+  const filter = useRef<Tone.Filter | null>(null);
+  const distortion = useRef<Tone.Distortion | null>(null);
   const activeSequences = useRef<Map<string, Tone.Sequence>>(new Map());
 
   useEffect(() => {
@@ -195,9 +231,13 @@ const BeatScriptApp: React.FC = () => {
     analyser.current = new Tone.Analyser('waveform', 32);
     recorder.current = new Tone.Recorder();
 
-    reverb.current = new Tone.Reverb({ decay: 1.5, wet: 0 }).toDestination();
-    delay.current = new Tone.FeedbackDelay("8n", 0).toDestination();
+    reverb.current = new Tone.Reverb({ decay: 1.5, wet: 0 });
+    delay.current = new Tone.FeedbackDelay("8n", 0);
+    filter.current = new Tone.Filter(20000, "lowpass");
+    distortion.current = new Tone.Distortion(0);
 
+    // Chain: Distortion -> Filter -> Delay -> Reverb -> Destination
+    distortion.current.chain(filter.current, delay.current, reverb.current, Tone.Destination);
     Tone.Destination.connect(recorder.current);
 
     const sampleBase = "https://tonejs.github.io/audio/drum-samples/";
@@ -213,19 +253,19 @@ const BeatScriptApp: React.FC = () => {
     }).connect(analyser.current!).toDestination();
 
     synths.current = {
-      melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current!).connect(reverb.current!).connect(delay.current!).toDestination(),
-      kick_synth: sampler.connect(analyser.current!).toDestination(),
-      snare_synth: sampler.connect(analyser.current!).toDestination(),
-      hihat_synth: sampler.connect(analyser.current!).toDestination(),
+      melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current!).connect(distortion.current!).toDestination(),
+      kick_synth: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
+      snare_synth: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
+      hihat_synth: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
       bass_synth: new Tone.PolySynth(Tone.MonoSynth, {
         oscillator: { type: 'sawtooth' },
         envelope: { attack: 0.1, release: 0.1 }
-      }).connect(analyser.current!).connect(delay.current!).toDestination(),
-      pad_synth: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).connect(reverb.current!).toDestination(),
-      kick: sampler.connect(analyser.current!).toDestination(),
-      clap: sampler.connect(analyser.current!).toDestination(),
-      bass: new Tone.PolySynth(Tone.MonoSynth).connect(analyser.current!).toDestination(),
-      pad: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).toDestination()
+      }).connect(analyser.current!).connect(distortion.current!).toDestination(),
+      pad_synth: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).connect(distortion.current!).toDestination(),
+      kick: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
+      clap: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
+      bass: new Tone.PolySynth(Tone.MonoSynth).connect(analyser.current!).connect(distortion.current!).toDestination(),
+      pad: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).connect(distortion.current!).toDestination()
     };
 
     const interval = setInterval(() => {
@@ -516,7 +556,32 @@ const BeatScriptApp: React.FC = () => {
   const handlePresetChange = (name: string) => {
     const newScript = PRESETS[name as keyof typeof PRESETS];
     setScript(newScript);
+    setCurrentProjectName(null);
     window.history.replaceState(null, '', `#${btoa(newScript)}`);
+  };
+
+  const saveProject = (name: string) => {
+     const updated = { ...projects, [name]: script };
+     setProjects(updated);
+     localStorage.setItem('beatscript_projects', JSON.stringify(updated));
+     setCurrentProjectName(name);
+  };
+
+  const loadProject = (name: string) => {
+     const projectScript = projects[name];
+     if (projectScript) {
+        setScript(projectScript);
+        setCurrentProjectName(name);
+        window.history.replaceState(null, '', `#${btoa(projectScript)}`);
+        setShowLibrary(false);
+     }
+  };
+
+  const deleteProject = (name: string) => {
+     const updated = { ...projects };
+     delete updated[name];
+     setProjects(updated);
+     localStorage.setItem('beatscript_projects', JSON.stringify(updated));
   };
 
   const handleToggleRecording = async () => {
@@ -538,6 +603,23 @@ const BeatScriptApp: React.FC = () => {
   };
 
   // Define BeatScript language for Monaco
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && (e.target as HTMLElement).tagName !== 'TEXTAREA' && (e.target as HTMLElement).tagName !== 'INPUT') {
+        e.preventDefault();
+        handleTogglePlay();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        const name = currentProjectName || prompt("Save as?");
+        if (name) saveProject(name);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, currentProjectName, script]);
+
   useEffect(() => {
     loader.init().then(monaco => {
       monaco.languages.register({ id: 'beatscript' });
@@ -736,9 +818,20 @@ const BeatScriptApp: React.FC = () => {
       <main className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <div
-          className="hidden md:flex w-16 border-r border-white/10 flex-col items-center py-6 gap-8 shrink-0"
+          className={`hidden md:flex border-r border-white/10 flex-col items-center py-6 gap-8 shrink-0 transition-all duration-300 relative ${isSidebarCollapsed ? 'w-0 overflow-hidden' : 'w-16'}`}
           style={{ backgroundColor: currentTheme.sidebar }}
         >
+           <button
+             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+             className={`absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-beatscript-gray border border-white/10 flex items-center justify-center z-10 hover:bg-gray-800 transition-colors ${isSidebarCollapsed ? 'translate-x-3' : ''}`}
+           >
+              {isSidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+           </button>
+           <FolderOpen
+              className={`${showLibrary ? 'text-beatscript-purple' : 'text-gray-500'} hover:text-beatscript-purple cursor-pointer transition-colors`}
+              size={24}
+              onClick={() => setShowLibrary(!showLibrary)}
+           />
            <BookOpen
               className={`${showDocs ? 'text-beatscript-purple' : 'text-gray-500'} hover:text-beatscript-purple cursor-pointer transition-colors`}
               size={24}
@@ -756,6 +849,44 @@ const BeatScriptApp: React.FC = () => {
 
         {/* Editor Area */}
         <div className="flex-1 flex flex-col bg-beatscript-black relative">
+          {showLibrary && (
+            <div className="absolute inset-0 z-[60] bg-black/95 backdrop-blur-xl p-12 overflow-y-auto animate-in fade-in zoom-in duration-300">
+               <div className="flex justify-between items-center mb-12">
+                  <h2 className="text-4xl font-black italic tracking-tighter">PROJECT <span className="text-beatscript-purple">LIBRARY</span></h2>
+                  <button onClick={() => setShowLibrary(false)} className="text-gray-500 hover:text-white transition-colors">CLOSE [X]</button>
+               </div>
+
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div
+                    onClick={() => {
+                       const name = prompt("Project Name?");
+                       if (name) saveProject(name);
+                    }}
+                    className="aspect-video rounded-2xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-4 hover:border-beatscript-purple/50 hover:bg-white/5 transition-all cursor-pointer group"
+                  >
+                     <Plus size={32} className="text-gray-600 group-hover:text-beatscript-purple" />
+                     <span className="text-xs font-bold uppercase tracking-widest text-gray-500">New Project</span>
+                  </div>
+
+                  {Object.entries(projects).map(([name, _]) => (
+                     <div key={name} className="aspect-video rounded-2xl bg-white/5 border border-white/10 p-6 flex flex-col justify-between group hover:border-beatscript-purple/50 transition-all">
+                        <div className="flex justify-between items-start">
+                           <h3 className="font-bold text-lg truncate pr-4">{name}</h3>
+                           <button onClick={() => deleteProject(name)} className="text-gray-600 hover:text-red-500 transition-colors">
+                              <Trash2 size={16} />
+                           </button>
+                        </div>
+                        <button
+                           onClick={() => loadProject(name)}
+                           className="w-full py-2 rounded-lg bg-beatscript-purple/10 border border-beatscript-purple/20 text-[10px] font-black uppercase tracking-widest hover:bg-beatscript-purple hover:text-white transition-all"
+                        >
+                           Load Project
+                        </button>
+                     </div>
+                  ))}
+               </div>
+            </div>
+          )}
           {showDocs && (
             <div className="absolute inset-0 z-[60] bg-black/95 backdrop-blur-xl p-12 overflow-y-auto animate-in fade-in zoom-in duration-300">
                <div className="flex justify-between items-center mb-12">
@@ -886,8 +1017,19 @@ const BeatScriptApp: React.FC = () => {
           <div className="flex items-center justify-between px-4 py-2.5 bg-black/40 text-xs font-mono text-gray-400 border-b border-white/5">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-beatscript-purple" />
-              <span>main.beat</span>
+              <span>{currentProjectName ? `${currentProjectName}.beat` : 'unsaved_composition.beat'}</span>
+              {!currentProjectName && <span className="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded ml-2">UNSAVED</span>}
             </div>
+            <button
+               onClick={() => {
+                  const name = currentProjectName || prompt("Save as?");
+                  if (name) saveProject(name);
+               }}
+               className="flex items-center gap-1.5 hover:text-white transition-colors text-[10px] font-bold"
+            >
+               <Save size={12} />
+               <span>SAVE</span>
+            </button>
             <div className="flex gap-4">
               <span>Ln {cursorPos.lineNumber}, Col {cursorPos.column}</span>
               <span>UTF-8</span>
@@ -929,9 +1071,15 @@ const BeatScriptApp: React.FC = () => {
 
         {/* Projection Area */}
         <div
-          className="hidden xl:flex w-[400px] flex-col border-l border-white/10 shrink-0"
+          className={`hidden xl:flex flex-col border-l border-white/10 shrink-0 transition-all duration-300 relative ${isProjectionCollapsed ? 'w-0 overflow-hidden' : 'w-[400px]'}`}
           style={{ backgroundColor: currentTheme.sidebar }}
         >
+           <button
+             onClick={() => setIsProjectionCollapsed(!isProjectionCollapsed)}
+             className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-beatscript-gray border border-white/10 flex items-center justify-center z-10 hover:bg-gray-800 transition-colors"
+           >
+              {isProjectionCollapsed ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}
+           </button>
           <div className="p-6 flex flex-col gap-8 flex-1 overflow-y-auto">
             <div className="flex flex-col gap-1">
               <h2 className="text-xs font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -985,6 +1133,20 @@ const BeatScriptApp: React.FC = () => {
                   )}
 
                   {projection.type === 'pattern' && !projection.isArray && (
+                    <div className="flex flex-col gap-4">
+                       <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-bold uppercase text-gray-400">Step Sequencer</span>
+                          <button
+                            onClick={() => {
+                               const random = new Array(projection.value.length).fill(0).map(() => Math.random() > 0.7 ? '1' : '0').join('');
+                               handleProjectionValueChange(random);
+                            }}
+                            className="p-1 rounded hover:bg-white/5 text-gray-500 hover:text-beatscript-purple transition-all"
+                            title="Randomize Pattern"
+                          >
+                             <Dice5 size={14} />
+                          </button>
+                       </div>
                     <div className="grid grid-cols-8 gap-2">
                       {projection.value.split('').map((bit: string, i: number) => (
                         <div
@@ -999,6 +1161,7 @@ const BeatScriptApp: React.FC = () => {
                           }`}
                         />
                       ))}
+                    </div>
                     </div>
                   )}
                   {projection.type === 'pattern' && projection.isArray && (
@@ -1033,12 +1196,37 @@ const BeatScriptApp: React.FC = () => {
                     <div className="flex flex-col gap-8">
                        <div className="flex flex-col gap-4">
                           <div className="flex justify-between items-center">
+                             <span className="text-[10px] font-bold uppercase text-gray-400">Low-Pass Filter</span>
+                          </div>
+                          <input
+                            type="range"
+                            className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                            min="20" max="20000" step="1"
+                            defaultValue="20000"
+                            onChange={(e) => { if(filter.current) filter.current.frequency.value = parseFloat(e.target.value) }}
+                          />
+                       </div>
+                       <div className="flex flex-col gap-4">
+                          <div className="flex justify-between items-center">
+                             <span className="text-[10px] font-bold uppercase text-gray-400">Distortion</span>
+                          </div>
+                          <input
+                            type="range"
+                            className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                            min="0" max="1" step="0.01"
+                            defaultValue="0"
+                            onChange={(e) => { if(distortion.current) distortion.current.distortion = parseFloat(e.target.value) }}
+                          />
+                       </div>
+                       <div className="flex flex-col gap-4">
+                          <div className="flex justify-between items-center">
                              <span className="text-[10px] font-bold uppercase text-gray-400">Reverb Wet</span>
                           </div>
                           <input
                             type="range"
                             className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
                             min="0" max="1" step="0.01"
+                            defaultValue="0"
                             onChange={(e) => { if(reverb.current) reverb.current.wet.value = parseFloat(e.target.value) }}
                           />
                        </div>
@@ -1050,6 +1238,7 @@ const BeatScriptApp: React.FC = () => {
                             type="range"
                             className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
                             min="0" max="0.9" step="0.01"
+                            defaultValue="0"
                             onChange={(e) => { if(delay.current) delay.current.feedback.value = parseFloat(e.target.value) }}
                           />
                        </div>
