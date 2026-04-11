@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as Tone from 'tone';
 import Editor, { loader } from '@monaco-editor/react';
-import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Copy, Check, Sparkles } from 'lucide-react';
+import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Copy, Check, Sparkles, Circle } from 'lucide-react';
 
 // --- Types ---
 interface BeatScript {
@@ -105,15 +105,20 @@ const BeatScriptApp: React.FC = () => {
   const [visualizerData, setVisualizerData] = useState<number[]>(new Array(32).fill(0));
   const [copied, setCopied] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const editorRef = useRef<any>(null);
 
   // Audio nodes
   const synths = useRef<Record<string, any>>({});
   const analyser = useRef<Tone.Analyser | null>(null);
+  const recorder = useRef<Tone.Recorder | null>(null);
+  const activeSequences = useRef<Map<string, Tone.Sequence>>(new Map());
 
   useEffect(() => {
     // Setup Tone.js
     analyser.current = new Tone.Analyser('waveform', 32);
+    recorder.current = new Tone.Recorder();
+    Tone.Destination.connect(recorder.current);
 
     synths.current = {
       melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current!).toDestination(),
@@ -221,8 +226,13 @@ const BeatScriptApp: React.FC = () => {
 
   const handleTogglePlay = async () => {
     if (isPlaying) {
+      if (isRecording) {
+        handleToggleRecording();
+      }
       Tone.Transport.stop();
       Tone.Transport.cancel();
+      activeSequences.current.forEach(s => s.dispose());
+      activeSequences.current.clear();
       setIsPlaying(false);
       return;
     }
@@ -234,37 +244,33 @@ const BeatScriptApp: React.FC = () => {
 
     if (beat.timeline.length === 0) return;
 
-    // Build the performance schedule
-    let currentTime = 0;
-    beat.timeline.forEach(sectionName => {
+    // Build loops for each section/track
+    beat.timeline.forEach((sectionName, sectionIndex) => {
       const section = beat.sections[sectionName];
       if (!section) return;
 
-      Object.entries(section.tracks).forEach(([_, track]) => {
+      Object.entries(section.tracks).forEach(([trackName, track]) => {
         const synth = synths.current[track.instrument];
         if (!synth) return;
 
-        if (typeof track.pattern === 'string') {
-          // Rhythmic pattern
-          for (let i = 0; i < track.pattern.length; i++) {
-            if (track.pattern[i] === '1') {
-              const time = `+${currentTime}m + ${i / 4}n`;
-              synth.triggerAttackRelease(track.instrument.includes('kick') ? 'C1' : 'C2', "16n", time);
-            }
+        const pattern = Array.isArray(track.pattern) ? track.pattern : track.pattern.split('');
+
+        const seq = new Tone.Sequence((time, noteOrBit) => {
+          if (noteOrBit === '1') {
+            synth.triggerAttackRelease(track.instrument.includes('kick') ? 'C1' : 'C2', "16n", time);
+          } else if (noteOrBit !== '0' && noteOrBit !== '_') {
+            synth.triggerAttackRelease(noteOrBit, "16n", time);
           }
-        } else if (Array.isArray(track.pattern)) {
-          // Melodic pattern
-          track.pattern.forEach((note, i) => {
-            if (note !== '_') {
-              const time = `+${currentTime}m + ${i / 4}n`;
-              synth.triggerAttackRelease(note, "16n", time);
-            }
-          });
-        }
+        }, pattern, "16n");
+
+        seq.start(`${sectionIndex * section.length}m`);
+        seq.stop(`${(sectionIndex + 1) * section.length}m`);
+        activeSequences.current.set(`${sectionName}_${trackName}`, seq);
       });
-      currentTime += section.length;
     });
 
+    Tone.Transport.loop = true;
+    Tone.Transport.loopEnd = `${beat.timeline.length * (beat.sections[beat.timeline[0]]?.length || 4)}m`;
     Tone.Transport.start();
     setIsPlaying(true);
   };
@@ -283,7 +289,10 @@ const BeatScriptApp: React.FC = () => {
       const val = line.split(':')[1].trim().replace(/^["']|["']$/g, '');
       setProjection({ type: 'select', label: 'Instrument Type', value: val, options: ['membrane', 'noise', 'fm', 'mono', 'subtractive'], lineNumber });
     } else if (line.includes('pattern:')) {
-      setProjection({ type: 'pattern', label: 'Pattern Editor', lineNumber });
+      let val = line.split(':')[1].trim();
+      const isArray = val.startsWith('[');
+      const cleanVal = val.replace(/^["']|["']$/g, '');
+      setProjection({ type: 'pattern', label: 'Pattern Editor', value: isArray ? val : cleanVal, isArray, lineNumber });
     } else {
       setProjection(null);
     }
@@ -311,16 +320,79 @@ const BeatScriptApp: React.FC = () => {
     if (parts.length === 2) {
       const indent = parts[0].match(/^\s*/)?.[0] || '';
       const key = parts[0].trim();
-      const formattedValue = typeof newValue === 'string' ? `"${newValue}"` : newValue;
+
+      // For patterns that are strings, we need to preserve quotes
+      let formattedValue = typeof newValue === 'string' && !projection.isArray ? `"${newValue}"` : newValue;
+
       lines[projection.lineNumber - 1] = `${indent}${key}: ${formattedValue}`;
       const newScript = lines.join('\n');
       setScript(newScript);
       setProjection({ ...projection, value: newValue });
+
+      // Real-time audio update
+      if (isPlaying) {
+        if (key === 'bpm') {
+          Tone.Transport.bpm.rampTo(newValue, 0.1);
+          setBpm(newValue);
+        } else if (key === 'frequency' || key === 'decay') {
+           // Find which synth this belongs to by looking up
+           let currentSynth: string | null = null;
+           for (let i = projection.lineNumber - 1; i >= 0; i--) {
+             const synthMatch = lines[i].match(/synth\s+(\w+)/);
+             if (synthMatch) {
+               currentSynth = synthMatch[1];
+               break;
+             }
+           }
+           if (currentSynth && synths.current[currentSynth]) {
+             const s = synths.current[currentSynth];
+             if (key === 'frequency' && s.frequency) s.frequency.value = newValue;
+             if (key === 'decay' && s.envelope) s.envelope.decay = newValue;
+           }
+        } else if (key === 'pattern') {
+           // Update Tone.Sequence
+           let trackName: string | null = null;
+           let sectionName: string | null = null;
+           for (let i = projection.lineNumber - 1; i >= 0; i--) {
+             const trackMatch = lines[i].match(/track\s+(\w+)/);
+             if (trackMatch && !trackName) trackName = trackMatch[1];
+             const sectionMatch = lines[i].match(/section\s+(\w+)/);
+             if (sectionMatch) {
+               sectionName = sectionMatch[1];
+               break;
+             }
+           }
+           if (sectionName && trackName) {
+              const seq = activeSequences.current.get(`${sectionName}_${trackName}`);
+              if (seq) {
+                seq.events = Array.isArray(newValue) ? newValue : newValue.split('');
+              }
+           }
+        }
+      }
     }
   };
 
   const handlePresetChange = (name: string) => {
     setScript(PRESETS[name as keyof typeof PRESETS]);
+  };
+
+  const handleToggleRecording = async () => {
+    if (!recorder.current) return;
+
+    if (isRecording) {
+      const recording = await recorder.current.stop();
+      const url = URL.createObjectURL(recording);
+      const anchor = document.createElement("a");
+      anchor.download = "beatscript_session.webm";
+      anchor.href = url;
+      anchor.click();
+      setIsRecording(false);
+    } else {
+      if (!isPlaying) await handleTogglePlay();
+      recorder.current.start();
+      setIsRecording(true);
+    }
   };
 
   // Define BeatScript language for Monaco
@@ -412,6 +484,17 @@ const BeatScriptApp: React.FC = () => {
                 title="Download .beat file"
               >
                 <Download size={18} />
+              </button>
+             <button
+                onClick={handleToggleRecording}
+                className={`p-2.5 rounded-full border border-white/10 transition-colors ${
+                  isRecording
+                    ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30 animate-pulse'
+                    : 'bg-beatscript-gray hover:bg-gray-800 text-gray-400 hover:text-white'
+                }`}
+                title={isRecording ? "Stop Recording" : "Record Session"}
+              >
+                <Circle size={18} fill={isRecording ? "currentColor" : "none"} />
               </button>
              <button
                 onClick={handleTogglePlay}
@@ -613,12 +696,30 @@ const BeatScriptApp: React.FC = () => {
                     </div>
                   )}
 
-                  {projection.type === 'pattern' && (
+                  {projection.type === 'pattern' && !projection.isArray && (
                     <div className="grid grid-cols-8 gap-2">
-                      {new Array(16).fill(0).map((_, i) => (
-                        <div key={i} className="aspect-square bg-gray-800 rounded border border-white/5 hover:bg-beatscript-purple/40 cursor-pointer transition-colors" />
+                      {projection.value.split('').map((bit: string, i: number) => (
+                        <div
+                          key={i}
+                          onClick={() => {
+                            const newPattern = projection.value.split('');
+                            newPattern[i] = newPattern[i] === '1' ? '0' : '1';
+                            handleProjectionValueChange(newPattern.join(''));
+                          }}
+                          className={`aspect-square rounded border border-white/5 cursor-pointer transition-all ${
+                            bit === '1' ? 'bg-beatscript-purple shadow-[0_0_10px_rgba(189,147,249,0.5)]' : 'bg-gray-800 hover:bg-gray-700'
+                          }`}
+                        />
                       ))}
                     </div>
+                  )}
+                  {projection.type === 'pattern' && projection.isArray && (
+                     <div className="flex flex-col gap-2">
+                        <p className="text-[10px] text-gray-500 italic">Melodic pattern editing coming soon...</p>
+                        <div className="bg-black/20 p-3 rounded font-mono text-[10px] text-gray-400">
+                           {projection.value}
+                        </div>
+                     </div>
                   )}
                 </div>
               </div>
