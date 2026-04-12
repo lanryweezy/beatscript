@@ -132,20 +132,24 @@ SendItem: lang::SendEffect = {
 };
 
 Pattern: lang::Pattern = {
-    "euclid" "(" <h:Integer> "," <s:Integer> ")" => lang::Pattern::Euclidean { hits: h as u8, steps: s as u8 },
-    "[" <v:Comma<PatternStep>> "]" => lang::Pattern::Notes(v.into_iter().enumerate().filter_map(|(i, step)| {
-        step.map(|note| lang::NoteEvent {
+    "euclidean" "(" <h:Integer> "," <s:Integer> <r:("," Integer)?> ")" => {
+        let rotate = r.map(|(_, val)| val as u8).unwrap_or(0);
+        lang::Pattern::Euclidean { hits: h as u8, steps: s as u8, rotate }
+    },
+    "[" <v:Comma<PatternStep>> "]" => lang::Pattern::Notes(v.into_iter().enumerate().flat_map(|(i, steps)| {
+        steps.into_iter().map(move |notes| lang::NoteEvent {
             time_steps: i as u32,
-            notes: vec![note],
+            notes,
             velocity: 100,
             duration_steps: 1,
         })
     }).collect()),
 };
 
-PatternStep: Option<String> = {
-    "_" => None,
-    <n:Identifier> => Some(n),
+PatternStep: Vec<Vec<String>> = {
+    "_" => vec![],
+    <n:Identifier> => vec![vec![n]],
+    "[" <v:Comma<Identifier>> "]" => vec![v],
 };
 
 Literal: lang::Value = {

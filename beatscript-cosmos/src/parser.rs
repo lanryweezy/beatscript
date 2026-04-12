@@ -36,7 +36,7 @@ mod tests {
                 length: 4
                 track kick {
                     instrument: my_synth,
-                    pattern: euclid(3, 8)
+                    pattern: euclidean(3, 8, 1)
                 }
             }
             timeline: [main]
@@ -53,7 +53,7 @@ mod tests {
         let code = r#"
             section s {
                 track t {
-                    pattern: [C3, _, G3, _]
+                    pattern: [C3, _, [G3, B3], _]
                 }
             }
         "#;

@@ -21,11 +21,11 @@ section main {
     length: 4
     track kick {
         instrument: kick_synth,
-        pattern: euclid(3, 8)
+        pattern: euclidean(3, 8)
     }
     track hihat {
         instrument: hihat_synth,
-        pattern: euclid(5, 8)
+        pattern: euclidean(5, 8)
     }
 }
 

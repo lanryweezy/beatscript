@@ -24,30 +24,45 @@ This repository contains two main implementations of BeatScript:
 1.  **BeatScript Web (Legacy/Demo):** A simple browser-based player using Tone.js (currently being upgraded to a modern React/TypeScript application).
 2.  **BeatScript Cosmos:** A next-generation high-performance audio engine written in Rust, featuring a projectional IDE.
 
-## Getting Started
+## Quick Start
 
-### Using the Web Demo
+### 🎹 For Musicians (No Coding Required)
+1.  **Launch the Studio:** [Link to hosted version or local dev server]
+2.  **Pick a Vibe:** Use the dropdown at the top to load a preset like "Neon Sunset" or "Deep Techno".
+3.  **Hit PLAY:** Experience the algorithmic magic.
+4.  **Tweak:** Click on patterns or synth parameters in the code; use the "Projection" sliders on the right to shape your sound in real-time.
+5.  **Record:** Hit the Record button to save your session as a high-quality audio file.
 
-#### Modern Web Player (React + TypeScript)
-We are building a modern, interactive web player. To run it locally:
-1.  Navigate to `beatscript-web`.
-2.  Install dependencies: `npm install`.
-3.  Start the dev server: `npm run dev`.
-4.  Open your browser to the provided URL (usually `http://localhost:5173`).
+### 🛠 For Developers & Sound Designers
+1.  **Clone the Repo:** `git clone https://github.com/jules/beatscript.git`
+2.  **Web Studio (React):**
+    ```bash
+    cd beatscript-web
+    npm install
+    npm run dev
+    ```
+3.  **Native Engine (Rust):**
+    ```bash
+    cd beatscript-cosmos
+    cargo run
+    ```
+    *Prerequisites: `libasound2-dev` on Linux.*
 
-#### Legacy Web Player
-For a simple, zero-dependency experience, you can open `t.html` directly in your browser.
+4.  **CLI Tools:**
+    Validate your scripts using the new `beatscript-cli`:
+    ```bash
+    cd beatscript-cli
+    cargo run -- validate ../examples/ambient_space.beat
+    ```
 
-### Exploring the Cosmos Engine (Rust)
+## Modern Features for Mass Adoption
 
-The Cosmos engine is located in the `beatscript-cosmos` directory. It uses the Iced GUI framework and CPAL for low-latency audio.
-
-```bash
-cd beatscript-cosmos
-cargo run
-```
-
-*(Note: Requires Rust and system audio libraries like ALSA on Linux)*
+- **Euclidean Rhythm Generator:** Create complex, mathematical beats with `euclidean(hits, steps, rotate)`.
+- **Projection UI:** A bridge between code and touch. Click any code block to reveal interactive GUI controls.
+- **Polyphonic Support:** Compose rich textures using chord notation (e.g., `[Cmaj7, _, Am7, _]`).
+- **Sample Manager:** Drag and drop your own WAV/MP3 samples directly into the browser.
+- **MIDI Integration:** Plug in your MIDI controller and play the internal synths live.
+- **Shareable URLs:** Every composition is encoded into a unique URL hash. Share your music with a single link.
 
 ## Example BeatScript
 

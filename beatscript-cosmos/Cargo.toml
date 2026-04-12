@@ -5,6 +5,10 @@ edition = "2021"
 authors = ["Gemini Agent"]
 description = "BeatScript V12 Cosmos Engine: A next-generation environment for music creation."
 
+[lib]
+name = "beatscript_cosmos"
+path = "src/lib.rs"
+
 [dependencies]
 # Core audio backend
 cpal = "0.15"

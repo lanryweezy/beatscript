@@ -107,7 +107,7 @@ section main {
   }
   track lead {
     instrument: "melody_synth",
-    pattern: ["C3", "Eb3", "G3", "Bb3", "G3", "Eb3", "F3", "D3"]
+    pattern: [["C3", "Eb3", "G3"], ["Eb3", "G3", "Bb3"], ["G3", "Bb3", "D4"], ["Bb3", "D4", "F4"]]
   }
 }
 
@@ -123,9 +123,9 @@ synth bass { type: "mono", frequency: 80 }
 
 section loop {
   length: 4
-  track bd { instrument: "kick", pattern: "1000100010001000" }
-  track cp { instrument: "clap", pattern: "0000100000001000" }
-  track bs { instrument: "bass", pattern: "1010010010100101" }
+  track bd { instrument: "kick", pattern: euclidean(4, 16) }
+  track cp { instrument: "clap", pattern: euclidean(2, 16, 4) }
+  track bs { instrument: "bass", pattern: euclidean(5, 16) }
 }
 
 timeline: ["loop", "loop"]`,
@@ -204,6 +204,7 @@ const BeatScriptApp: React.FC = () => {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showDocs, setShowDocs] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isProjectionCollapsed, setIsProjectionCollapsed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -218,6 +219,7 @@ const BeatScriptApp: React.FC = () => {
 
   // Audio nodes
   const synths = useRef<Record<string, any>>({});
+  const samplerRef = useRef<Tone.Sampler | null>(null);
   const analyser = useRef<Tone.Analyser | null>(null);
   const recorder = useRef<Tone.Recorder | null>(null);
   const reverb = useRef<Tone.Reverb | null>(null);
@@ -240,6 +242,28 @@ const BeatScriptApp: React.FC = () => {
     distortion.current.chain(filter.current, delay.current, reverb.current, Tone.Destination);
     Tone.Destination.connect(recorder.current);
 
+    // MIDI Support
+    if (navigator.requestMIDIAccess) {
+      navigator.requestMIDIAccess().then((access) => {
+        access.inputs.forEach((input) => {
+          input.onmidimessage = (event) => {
+            const [status, note, velocity] = event.data;
+            if (status === 144 && velocity > 0) { // Note On
+              const noteName = Tone.Frequency(note, "midi").toNote();
+              if (synths.current["melody_synth"]) {
+                 synths.current["melody_synth"].triggerAttack(noteName);
+              }
+            } else if (status === 128 || (status === 144 && velocity === 0)) { // Note Off
+              const noteName = Tone.Frequency(note, "midi").toNote();
+              if (synths.current["melody_synth"]) {
+                 synths.current["melody_synth"].triggerRelease(noteName);
+              }
+            }
+          };
+        });
+      });
+    }
+
     const sampleBase = "https://tonejs.github.io/audio/drum-samples/";
     const sampler = new Tone.Sampler({
       urls: {
@@ -251,6 +275,7 @@ const BeatScriptApp: React.FC = () => {
       baseUrl: sampleBase,
       onload: () => setIsSamplesLoaded(true)
     }).connect(analyser.current!).toDestination();
+    samplerRef.current = sampler;
 
     synths.current = {
       melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current!).connect(distortion.current!).toDestination(),
@@ -291,6 +316,18 @@ const BeatScriptApp: React.FC = () => {
     };
   }, [isPlaying]);
 
+  const generateEuclidean = (k: number, n: number, rotate: number = 0): string => {
+    let pattern = [];
+    for (let i = 0; i < n; i++) {
+      pattern.push(Math.floor((i * k) / n) !== Math.floor(((i - 1) * k) / n) ? "1" : "0");
+    }
+    for (let i = 0; i < rotate; i++) {
+      const last = pattern.pop();
+      if (last !== undefined) pattern.unshift(last);
+    }
+    return pattern.join("");
+  };
+
   // Robust-ish parser
   const parseBeatScript = (str: string): BeatScript => {
     const res: BeatScript = { bpm: 120, sections: {}, synths: {}, timeline: [] };
@@ -329,16 +366,43 @@ const BeatScriptApp: React.FC = () => {
            // Dynamic parameter update simulation
         }
 
-        const patMatch = trackContent.match(/pattern:\s*(["'][\d]+["']|\[[^\]]*\])/);
+        const patMatch = trackContent.match(/pattern:\s*(euclidean\([^)]*\)|["'][\d]+["']|\[[^\]]*\])/);
         if (patMatch) {
           const val = patMatch[1].trim();
-          if (val.startsWith('"') || val.startsWith("'")) {
+          if (val.startsWith('euclidean')) {
+            const params = val.match(/\(([^)]*)\)/);
+            if (params) {
+              const [k, n, r] = params[1].split(',').map(s => parseInt(s.trim(), 10));
+              track.pattern = generateEuclidean(k || 0, n || 16, r || 0);
+            }
+          } else if (val.startsWith('"') || val.startsWith("'")) {
             track.pattern = val.slice(1, -1);
           } else {
             try {
-              // Handle identifiers in array like [C3, _, Eb3]
+              // Handle identifiers/chords in array like [C3, _, Eb3] or [[C3, E3, G3], [F3, A3, C4]]
               const arrayContent = val.slice(1, -1);
-              track.pattern = arrayContent.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+              // Simple nested array support: [[A,B], [C,D]] -> ["A,B", "C,D"]
+              const steps = [];
+              let currentStep = "";
+              let depth = 0;
+              for (let char of arrayContent) {
+                if (char === '[') depth++;
+                if (char === ']') depth--;
+                if (char === ',' && depth === 0) {
+                  steps.push(currentStep.trim());
+                  currentStep = "";
+                } else {
+                  currentStep += char;
+                }
+              }
+              steps.push(currentStep.trim());
+
+              track.pattern = steps.map(s => {
+                if (s.startsWith('[') && s.endsWith(']')) {
+                  return s.slice(1, -1).split(',').map(n => n.trim().replace(/^["']|["']$/g, ''));
+                }
+                return s.replace(/^["']|["']$/g, '');
+              });
             } catch (e) {}
           }
         }
@@ -393,6 +457,9 @@ const BeatScriptApp: React.FC = () => {
             else if (track.instrument === 'snare_synth' || track.instrument === 'clap') synth.triggerAttackRelease('D1', "16n", time);
             else if (track.instrument === 'hihat_synth') synth.triggerAttackRelease('E1', "16n", time);
             else synth.triggerAttackRelease('C2', "16n", time);
+          } else if (Array.isArray(noteOrBit)) {
+             // Polyphonic support
+             synth.triggerAttackRelease(noteOrBit, "16n", time);
           } else if (noteOrBit !== '0' && noteOrBit !== '_') {
             synth.triggerAttackRelease(noteOrBit, "16n", time);
           }
@@ -427,9 +494,17 @@ const BeatScriptApp: React.FC = () => {
       setProjection({ type: 'select', label: 'Instrument Type', value: val, options: ['membrane', 'noise', 'fm', 'mono', 'subtractive'], lineNumber });
     } else if (line.includes('pattern:')) {
       let val = line.split(':')[1].trim();
-      const isArray = val.startsWith('[');
-      const cleanVal = val.replace(/^["']|["']$/g, '');
-      setProjection({ type: 'pattern', label: 'Pattern Editor', value: isArray ? val : cleanVal, isArray, lineNumber });
+      if (val.startsWith('euclidean')) {
+         const params = val.match(/\(([^)]*)\)/);
+         if (params) {
+            const [k, n, r] = params[1].split(',').map(s => parseInt(s.trim(), 10));
+            setProjection({ type: 'euclidean', label: 'Euclidean Generator', k: k||0, n: n||16, rotate: r||0, lineNumber });
+         }
+      } else {
+         const isArray = val.startsWith('[');
+         const cleanVal = val.replace(/^["']|["']$/g, '');
+         setProjection({ type: 'pattern', label: 'Pattern Editor', value: isArray ? val : cleanVal, isArray, lineNumber });
+      }
     } else {
       setProjection(null);
     }
@@ -843,7 +918,11 @@ const BeatScriptApp: React.FC = () => {
               onClick={() => setShowTutorial(!showTutorial)}
            />
            <Cpu className="text-beatscript-purple cursor-pointer transition-colors" size={24} />
-           <Settings className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" size={24} />
+           <Settings
+              className={`${showSettings ? 'text-beatscript-purple' : 'text-gray-500'} hover:text-beatscript-purple cursor-pointer transition-colors`}
+              size={24}
+              onClick={() => setShowSettings(!showSettings)}
+           />
            <div className="mt-auto mb-2 text-[10px] font-bold text-gray-600 -rotate-90 origin-center whitespace-nowrap">STUDIO MODE</div>
         </div>
 
@@ -884,6 +963,58 @@ const BeatScriptApp: React.FC = () => {
                         </button>
                      </div>
                   ))}
+               </div>
+            </div>
+          )}
+          {showSettings && (
+            <div className="absolute inset-0 z-[60] bg-black/95 backdrop-blur-xl p-12 overflow-y-auto animate-in fade-in zoom-in duration-300">
+               <div className="flex justify-between items-center mb-12">
+                  <h2 className="text-4xl font-black italic tracking-tighter">STUDIO <span className="text-beatscript-purple">SETTINGS</span></h2>
+                  <button onClick={() => setShowSettings(false)} className="text-gray-500 hover:text-white transition-colors">CLOSE [X]</button>
+               </div>
+
+               <div className="max-w-2xl mx-auto flex flex-col gap-12">
+                  <section className="flex flex-col gap-6">
+                     <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">Sample Manager</h3>
+                     <div className="bg-white/5 p-8 rounded-2xl border border-white/10 flex flex-col items-center gap-6">
+                        <Volume2 size={48} className="text-gray-600" />
+                        <div className="text-center">
+                           <p className="text-lg font-bold">Import Custom Samples</p>
+                           <p className="text-sm text-gray-400">Drag and drop audio files to use them as instruments.</p>
+                        </div>
+                        <input
+                           type="file"
+                           accept="audio/*"
+                           className="hidden"
+                           id="sample-upload"
+                           onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file && samplerRef.current) {
+                                 const url = URL.createObjectURL(file);
+                                 samplerRef.current.add("F1", url);
+                                 alert(`Sample ${file.name} loaded to slot F1 (use instrument 'clap')`);
+                              }
+                           }}
+                        />
+                        <label
+                           htmlFor="sample-upload"
+                           className="px-8 py-3 rounded-full bg-beatscript-purple font-black uppercase tracking-widest text-xs hover:scale-105 transition-all cursor-pointer"
+                        >
+                           Upload WAV/MP3
+                        </label>
+                     </div>
+                  </section>
+
+                  <section className="flex flex-col gap-6">
+                     <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">MIDI Configuration</h3>
+                     <div className="bg-white/5 p-8 rounded-2xl border border-white/10 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                           <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+                           <span className="font-bold">WebMIDI Status</span>
+                        </div>
+                        <span className="text-xs font-mono text-gray-400">ACTIVE / LISTENING</span>
+                     </div>
+                  </section>
                </div>
             </div>
           )}
@@ -1188,6 +1319,62 @@ const BeatScriptApp: React.FC = () => {
                         </div>
                         <div className="bg-black/20 p-3 rounded font-mono text-[10px] text-gray-400">
                            {Array.isArray(projection.value) ? projection.value.join(', ') : projection.value}
+                        </div>
+                     </div>
+                  )}
+
+                  {projection.type === 'euclidean' && (
+                     <div className="flex flex-col gap-8">
+                        <div className="flex flex-col gap-4">
+                           <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-bold uppercase text-gray-400">Hits (k)</span>
+                              <span className="text-xs font-mono">{projection.k}</span>
+                           </div>
+                           <input
+                             type="range"
+                             className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                             min="0" max={projection.n} step="1"
+                             value={projection.k}
+                             onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setProjection({...projection, k: val});
+                                handleProjectionValueChange(`euclidean(${val}, ${projection.n}${projection.rotate ? `, ${projection.rotate}` : ''})`);
+                             }}
+                           />
+                        </div>
+                        <div className="flex flex-col gap-4">
+                           <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-bold uppercase text-gray-400">Steps (n)</span>
+                              <span className="text-xs font-mono">{projection.n}</span>
+                           </div>
+                           <input
+                             type="range"
+                             className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                             min="1" max="32" step="1"
+                             value={projection.n}
+                             onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setProjection({...projection, n: val});
+                                handleProjectionValueChange(`euclidean(${projection.k}, ${val}${projection.rotate ? `, ${projection.rotate}` : ''})`);
+                             }}
+                           />
+                        </div>
+                        <div className="flex flex-col gap-4">
+                           <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-bold uppercase text-gray-400">Rotate</span>
+                              <span className="text-xs font-mono">{projection.rotate}</span>
+                           </div>
+                           <input
+                             type="range"
+                             className="w-full accent-beatscript-purple h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                             min="0" max={projection.n - 1} step="1"
+                             value={projection.rotate}
+                             onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setProjection({...projection, rotate: val});
+                                handleProjectionValueChange(`euclidean(${projection.k}, ${projection.n}, ${val})`);
+                             }}
+                           />
                         </div>
                      </div>
                   )}

@@ -55,7 +55,7 @@ pub struct SendEffect {
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Euclidean { hits: u8, steps: u8 },
+    Euclidean { hits: u8, steps: u8, rotate: u8 },
     Notes(Vec<NoteEvent>),
 }
 

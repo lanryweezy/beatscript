@@ -178,21 +178,24 @@ impl SectionPlayer {
 fn unroll_pattern(pattern: &Pattern) -> Vec<NoteEvent> {
     match pattern {
         Pattern::Notes(notes) => notes.clone(),
-        Pattern::Euclidean { hits, steps } => {
+        Pattern::Euclidean { hits, steps, rotate } => {
             let mut notes = vec![];
-            let mut count = 0.0;
+            let k = *hits as f32;
+            let n = *steps as f32;
             for i in 0..*steps {
-                let last = count;
-                count += *hits as f32 / *steps as f32;
-                if count.floor() > last.floor() {
+                let val = ((i as f32 * k) / n).floor() != (((i as f32 - 1.0) * k) / n).floor();
+                if val {
+                    // Apply rotation
+                    let rotated_i = (i + *rotate as u32) % *steps as u32;
                     notes.push(NoteEvent {
-                        time_steps: i as u32,
+                        time_steps: rotated_i,
                         notes: vec!["C3".to_string()], // Default for Euclidean
                         velocity: 100,
                         duration_steps: 1,
                     });
                 }
             }
+            notes.sort_by_key(|n| n.time_steps);
             notes
         }
     }
