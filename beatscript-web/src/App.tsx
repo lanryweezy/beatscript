@@ -208,6 +208,7 @@ const BeatScriptApp: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isProjectionCollapsed, setIsProjectionCollapsed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [midiActivity, setMidiActivity] = useState(false);
   const [isSamplesLoaded, setIsSamplesLoaded] = useState(false);
   const [projects, setProjects] = useState<Record<string, string>>(() => {
     const saved = localStorage.getItem('beatscript_projects');
@@ -226,6 +227,8 @@ const BeatScriptApp: React.FC = () => {
   const delay = useRef<Tone.FeedbackDelay | null>(null);
   const filter = useRef<Tone.Filter | null>(null);
   const distortion = useRef<Tone.Distortion | null>(null);
+  const limiter = useRef<Tone.Limiter | null>(null);
+  const compressor = useRef<Tone.Compressor | null>(null);
   const activeSequences = useRef<Map<string, Tone.Sequence>>(new Map());
 
   useEffect(() => {
@@ -237,9 +240,16 @@ const BeatScriptApp: React.FC = () => {
     delay.current = new Tone.FeedbackDelay("8n", 0);
     filter.current = new Tone.Filter(20000, "lowpass");
     distortion.current = new Tone.Distortion(0);
+    limiter.current = new Tone.Limiter(-0.1); // Prevent digital clipping
+    compressor.current = new Tone.Compressor({
+      threshold: -12,
+      ratio: 4,
+      attack: 0.003,
+      release: 0.25
+    });
 
-    // Chain: Distortion -> Filter -> Delay -> Reverb -> Destination
-    distortion.current.chain(filter.current, delay.current, reverb.current, Tone.Destination);
+    // Chain: Distortion -> Filter -> Delay -> Reverb -> Compressor -> Limiter -> Destination
+    distortion.current.chain(filter.current, delay.current, reverb.current, compressor.current, limiter.current, Tone.Destination);
     Tone.Destination.connect(recorder.current);
 
     // MIDI Support
@@ -249,6 +259,8 @@ const BeatScriptApp: React.FC = () => {
           input.onmidimessage = (event) => {
             const [status, note, velocity] = event.data;
             if (status === 144 && velocity > 0) { // Note On
+              setMidiActivity(true);
+              setTimeout(() => setMidiActivity(false), 100);
               const noteName = Tone.Frequency(note, "midi").toNote();
               if (synths.current["melody_synth"]) {
                  synths.current["melody_synth"].triggerAttack(noteName);
@@ -330,6 +342,8 @@ const BeatScriptApp: React.FC = () => {
 
   // Robust-ish parser
   const parseBeatScript = (str: string): BeatScript => {
+    // Normalize whitespace for easier regex matching
+    str = str.replace(/\s+/g, ' ');
     const res: BeatScript = { bpm: 120, sections: {}, synths: {}, timeline: [] };
 
     // Remove comments
@@ -1009,10 +1023,10 @@ const BeatScriptApp: React.FC = () => {
                      <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">MIDI Configuration</h3>
                      <div className="bg-white/5 p-8 rounded-2xl border border-white/10 flex items-center justify-between">
                         <div className="flex items-center gap-4">
-                           <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+                           <div className={`w-3 h-3 rounded-full transition-all duration-75 ${midiActivity ? 'bg-yellow-400 scale-150' : 'bg-green-500'}`} />
                            <span className="font-bold">WebMIDI Status</span>
                         </div>
-                        <span className="text-xs font-mono text-gray-400">ACTIVE / LISTENING</span>
+                        <span className="text-xs font-mono text-gray-400">{midiActivity ? 'RECEIVING DATA...' : 'ACTIVE / LISTENING'}</span>
                      </div>
                   </section>
                </div>
