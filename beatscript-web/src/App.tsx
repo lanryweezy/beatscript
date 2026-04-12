@@ -8,8 +8,14 @@ import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, 
 interface BeatScript {
   bpm: number;
   sections: Record<string, Section>;
-  synths: Record<string, any>;
+  synths: Record<string, SynthConfig>;
   timeline: string[];
+}
+
+interface SynthConfig {
+  type: string;
+  frequency?: number;
+  decay?: number;
 }
 
 interface Section {
@@ -20,6 +26,8 @@ interface Section {
 interface Track {
   instrument: string;
   pattern: string | string[];
+  volume?: number;
+  pan?: number;
 }
 
 // --- Presets ---
@@ -216,6 +224,10 @@ const BeatScriptApp: React.FC = () => {
   });
   const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [theme, setTheme] = useState<keyof typeof THEMES>("Default");
+  const [consoleLogs, setConsoleLogs] = useState<{msg: string, type: 'info' | 'error'}[]>([]);
+  const [showConsole, setShowConsole] = useState(false);
+  const [activeTracks, setActiveTracks] = useState<Set<string>>(new Set());
+  const [currentStep, setCurrentStep] = useState(-1);
   const editorRef = useRef<any>(null);
 
   // Audio nodes
@@ -289,21 +301,8 @@ const BeatScriptApp: React.FC = () => {
     }).connect(analyser.current!).toDestination();
     samplerRef.current = sampler;
 
-    synths.current = {
-      melody_synth: new Tone.PolySynth(Tone.Synth).connect(analyser.current!).connect(distortion.current!).toDestination(),
-      kick_synth: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
-      snare_synth: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
-      hihat_synth: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
-      bass_synth: new Tone.PolySynth(Tone.MonoSynth, {
-        oscillator: { type: 'sawtooth' },
-        envelope: { attack: 0.1, release: 0.1 }
-      }).connect(analyser.current!).connect(distortion.current!).toDestination(),
-      pad_synth: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).connect(distortion.current!).toDestination(),
-      kick: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
-      clap: sampler.connect(analyser.current!).connect(distortion.current!).toDestination(),
-      bass: new Tone.PolySynth(Tone.MonoSynth).connect(analyser.current!).connect(distortion.current!).toDestination(),
-      pad: new Tone.PolySynth(Tone.FMSynth).connect(analyser.current!).connect(distortion.current!).toDestination()
-    };
+    // Initial synths will be populated on Play from script
+    synths.current = {};
 
     const interval = setInterval(() => {
       if (analyser.current && isPlaying) {
@@ -356,8 +355,27 @@ const BeatScriptApp: React.FC = () => {
       if (bpmMatch) res.bpm = parseInt(bpmMatch[1], 10);
     }
 
+    // Parse synths
+    const synthsMatch = Array.from(cleanStr.matchAll(/synth\s+(\w+)\s*\{([^}]*)\}/g));
+    for (const match of synthsMatch) {
+      const synthName = match[1];
+      const synthContent = match[2];
+      const config: any = { type: 'membrane' };
+
+      const typeMatch = synthContent.match(/type:\s*["']?(\w+)["']?/);
+      if (typeMatch) config.type = typeMatch[1];
+
+      const freqMatch = synthContent.match(/frequency:\s*(\d+\.?\d*)/);
+      if (freqMatch) config.frequency = parseFloat(freqMatch[1]);
+
+      const decayMatch = synthContent.match(/decay:\s*(\d+\.?\d*)/);
+      if (decayMatch) config.decay = parseFloat(decayMatch[1]);
+
+      res.synths[synthName] = config;
+    }
+
     // Parse sections
-    const sectionsMatch = cleanStr.matchAll(/section\s+(\w+)\s*\{([^}]*)\}/g);
+    const sectionsMatch = Array.from(cleanStr.matchAll(/section\s+(\w+)\s*\{([^}]*)\}/g));
     for (const match of sectionsMatch) {
       const sectionName = match[1];
       const sectionContent = match[2];
@@ -366,7 +384,7 @@ const BeatScriptApp: React.FC = () => {
       const lenMatch = sectionContent.match(/length:\s*(\d+)/);
       if (lenMatch) section.length = parseInt(lenMatch[1], 10);
 
-      const tracksMatch = sectionContent.matchAll(/track\s+(\w+)\s*\{([^}]*)\}/g);
+      const tracksMatch = Array.from(sectionContent.matchAll(/track\s+(\w+)\s*\{([^}]*)\}/g));
       for (const tMatch of tracksMatch) {
         const trackName = tMatch[1];
         const trackContent = tMatch[2];
@@ -375,10 +393,11 @@ const BeatScriptApp: React.FC = () => {
         const instMatch = trackContent.match(/instrument:\s*["']?(\w+)["']?/);
         if (instMatch) track.instrument = instMatch[1];
 
-        const decayMatch = trackContent.match(/decay:\s*(\d+\.?\d*)/);
-        if (decayMatch && synths.current[track.instrument]) {
-           // Dynamic parameter update simulation
-        }
+        const volMatch = trackContent.match(/volume:\s*(-?\d+)/);
+        if (volMatch) track.volume = parseInt(volMatch[1], 10);
+
+        const panMatch = trackContent.match(/pan:\s*(-?\d+\.?\d*)/);
+        if (panMatch) track.pan = parseFloat(panMatch[1]);
 
         const patMatch = trackContent.match(/pattern:\s*(euclidean\([^)]*\)|["'][\d]+["']|\[[^\]]*\])/);
         if (patMatch) {
@@ -443,39 +462,131 @@ const BeatScriptApp: React.FC = () => {
       Tone.Transport.cancel();
       activeSequences.current.forEach(s => s.dispose());
       activeSequences.current.clear();
+      Object.values(synths.current).forEach(s => s.dispose());
+      synths.current = {};
       setIsPlaying(false);
       return;
     }
 
     await Tone.start();
-    const beat = parseBeatScript(script);
+
+    // Clear old markers
+    if (editorRef.current) {
+      const monaco = (window as any).monaco;
+      if (monaco) {
+         monaco.editor.setModelMarkers(editorRef.current.getModel(), 'beatscript', []);
+      }
+    }
+
+    let beat;
+    try {
+      beat = parseBeatScript(script);
+      setConsoleLogs(prev => [{msg: `Parsed composition: ${beat.timeline.length} sections`, type: 'info'}, ...prev.slice(0, 50)]);
+    } catch (e: any) {
+      setConsoleLogs(prev => [{msg: `Parse Error: ${e.message}`, type: 'error'}, ...prev.slice(0, 50)]);
+      setShowConsole(true);
+      return;
+    }
     setBpm(beat.bpm);
     Tone.Transport.bpm.value = beat.bpm;
 
     if (beat.timeline.length === 0) return;
 
+    // Dispose old synths if any
+    Object.values(synths.current).forEach(s => s.dispose());
+    synths.current = {};
+
+    // Initialize Synths from Script
+    Object.entries(beat.synths).forEach(([name, config]: [string, any]) => {
+      let synth: any;
+      const destination = analyser.current;
+      if (!destination) return;
+
+      switch (config.type) {
+        case 'membrane':
+        case 'kick':
+          synth = new Tone.MembraneSynth().connect(destination).connect(distortion.current!).toDestination();
+          break;
+        case 'noise':
+        case 'snare':
+        case 'hihat':
+          synth = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { decay: config.decay || 0.1 }
+          }).connect(destination).connect(distortion.current!).toDestination();
+          break;
+        case 'fm':
+          synth = new Tone.PolySynth(Tone.FMSynth).connect(destination).connect(distortion.current!).toDestination();
+          break;
+        case 'mono':
+          synth = new Tone.PolySynth(Tone.MonoSynth).connect(destination).connect(distortion.current!).toDestination();
+          break;
+        default:
+          synth = new Tone.PolySynth(Tone.Synth).connect(destination).connect(distortion.current!).toDestination();
+      }
+
+      if (config.decay && (synth as any).envelope) {
+         (synth as any).envelope.decay = config.decay;
+      }
+
+      synths.current[name] = synth;
+    });
+
     // Build loops for each section/track
     beat.timeline.forEach((sectionName, sectionIndex) => {
-      const section = beat.sections[sectionName];
+      const section = (beat.sections as any)[sectionName];
       if (!section) return;
 
-      Object.entries(section.tracks).forEach(([trackName, track]) => {
-        const synth = synths.current[track.instrument];
-        if (!synth) return;
+      Object.entries(section.tracks).forEach(([trackName, track]: [string, any]) => {
+        const baseSynth = synths.current[track.instrument];
+        if (!baseSynth) return;
+
+        // Create per-track channel for mixing
+        const volumeNode = new Tone.Volume(track.volume || 0).connect(analyser.current!);
+        const pannerNode = new Tone.Panner(track.pan || 0).connect(volumeNode);
+
+        baseSynth.connect(pannerNode);
 
         const pattern = Array.isArray(track.pattern) ? track.pattern : track.pattern.split('');
 
+        const synthConfig = beat.synths[track.instrument] || { type: 'synth' };
+
+        let stepCount = 0;
         const seq = new Tone.Sequence((time, noteOrBit) => {
-          if (noteOrBit === '1') {
-            if (track.instrument === 'kick_synth' || track.instrument === 'kick') synth.triggerAttackRelease('C1', "16n", time);
-            else if (track.instrument === 'snare_synth' || track.instrument === 'clap') synth.triggerAttackRelease('D1', "16n", time);
-            else if (track.instrument === 'hihat_synth') synth.triggerAttackRelease('E1', "16n", time);
-            else synth.triggerAttackRelease('C2', "16n", time);
-          } else if (Array.isArray(noteOrBit)) {
-             // Polyphonic support
-             synth.triggerAttackRelease(noteOrBit, "16n", time);
-          } else if (noteOrBit !== '0' && noteOrBit !== '_') {
-            synth.triggerAttackRelease(noteOrBit, "16n", time);
+          const index = stepCount % pattern.length;
+          stepCount++;
+          try {
+            Tone.Draw.schedule(() => {
+              setActiveTracks(prev => {
+                const next = new Set(prev);
+                next.add(`${sectionName}_${trackName}`);
+                return next;
+              });
+              setCurrentStep(index % 16); // Assuming 16 steps for visualization
+              setTimeout(() => {
+                setActiveTracks(prev => {
+                  const next = new Set(prev);
+                  next.delete(`${sectionName}_${trackName}`);
+                  return next;
+                });
+              }, 100);
+            }, time);
+
+            if (noteOrBit === '1') {
+              if (synthConfig.type === 'noise' || synthConfig.type === 'snare' || synthConfig.type === 'hihat') {
+                baseSynth.triggerAttackRelease("16n", time);
+              } else if (synthConfig.type === 'membrane' || synthConfig.type === 'kick') {
+                baseSynth.triggerAttackRelease("C1", "16n", time);
+              } else {
+                baseSynth.triggerAttackRelease("C2", "16n", time);
+              }
+            } else if (Array.isArray(noteOrBit)) {
+              baseSynth.triggerAttackRelease(noteOrBit, "16n", time);
+            } else if (noteOrBit !== '0' && noteOrBit !== '_') {
+              baseSynth.triggerAttackRelease(noteOrBit, "16n", time);
+            }
+          } catch (e) {
+            console.error(`Playback error on track ${trackName}:`, e);
           }
         }, pattern, "16n");
 
@@ -502,10 +613,22 @@ const BeatScriptApp: React.FC = () => {
       setProjection({ type: 'knob', label: 'Frequency', value: val, min: 20, max: 2000, lineNumber });
     } else if (line.includes('decay:')) {
       const val = parseFloat(line.split(':')[1].trim());
-      setProjection({ type: 'knob', label: 'Decay', value: val, min: 0.01, max: 2.0, lineNumber });
+      setProjection({ type: 'knob', label: 'Decay', value: val, min: 0.01, max: 4.0, lineNumber });
+    } else if (line.includes('sustain:')) {
+      const val = parseFloat(line.split(':')[1].trim());
+      setProjection({ type: 'knob', label: 'Sustain', value: val, min: 0, max: 1.0, lineNumber });
+    } else if (line.includes('oscillator:')) {
+      const val = line.split(':')[1].trim().replace(/^["']|["']$/g, '');
+      setProjection({ type: 'select', label: 'Oscillator', value: val, options: ['sine', 'square', 'sawtooth', 'triangle', 'fatsawtooth', 'pulse'], lineNumber });
     } else if (line.includes('type:')) {
       const val = line.split(':')[1].trim().replace(/^["']|["']$/g, '');
       setProjection({ type: 'select', label: 'Instrument Type', value: val, options: ['membrane', 'noise', 'fm', 'mono', 'subtractive'], lineNumber });
+    } else if (line.includes('volume:')) {
+      const val = parseInt(line.split(':')[1].trim(), 10);
+      setProjection({ type: 'knob', label: 'Track Volume (dB)', value: val, min: -60, max: 12, lineNumber });
+    } else if (line.includes('pan:')) {
+      const val = parseFloat(line.split(':')[1].trim());
+      setProjection({ type: 'knob', label: 'Track Pan', value: val, min: -1.0, max: 1.0, lineNumber });
     } else if (line.includes('pattern:')) {
       let val = line.split(':')[1].trim();
       if (val.startsWith('euclidean')) {
@@ -603,7 +726,7 @@ const BeatScriptApp: React.FC = () => {
         if (key === 'bpm') {
           Tone.Transport.bpm.rampTo(newValue, 0.1);
           setBpm(newValue);
-        } else if (key === 'frequency' || key === 'decay') {
+        } else if (key === 'frequency' || key === 'decay' || key === 'sustain' || key === 'oscillator') {
            // Find which synth this belongs to by looking up
            let currentSynth: string | null = null;
            for (let i = projection.lineNumber - 1; i >= 0; i--) {
@@ -617,6 +740,8 @@ const BeatScriptApp: React.FC = () => {
              const s = synths.current[currentSynth];
              if (key === 'frequency' && s.frequency) s.frequency.value = newValue;
              if (key === 'decay' && s.envelope) s.envelope.decay = newValue;
+             if (key === 'sustain' && s.envelope) s.envelope.sustain = newValue;
+             if (key === 'oscillator' && s.oscillator) s.oscillator.type = newValue;
            }
         } else if (key === 'pattern') {
            // Update Tone.Sequence
@@ -937,6 +1062,11 @@ const BeatScriptApp: React.FC = () => {
               size={24}
               onClick={() => setShowSettings(!showSettings)}
            />
+           <Activity
+              className={`${showConsole ? 'text-beatscript-purple' : 'text-gray-500'} hover:text-beatscript-purple cursor-pointer transition-colors`}
+              size={24}
+              onClick={() => setShowConsole(!showConsole)}
+           />
            <div className="mt-auto mb-2 text-[10px] font-bold text-gray-600 -rotate-90 origin-center whitespace-nowrap">STUDIO MODE</div>
         </div>
 
@@ -1029,6 +1159,26 @@ const BeatScriptApp: React.FC = () => {
                         <span className="text-xs font-mono text-gray-400">{midiActivity ? 'RECEIVING DATA...' : 'ACTIVE / LISTENING'}</span>
                      </div>
                   </section>
+               </div>
+            </div>
+          )}
+          {showConsole && (
+            <div className="absolute inset-0 z-[60] bg-black/95 backdrop-blur-xl p-12 overflow-y-auto animate-in fade-in zoom-in duration-300">
+               <div className="flex justify-between items-center mb-12">
+                  <h2 className="text-4xl font-black italic tracking-tighter">STUDIO <span className="text-beatscript-purple">CONSOLE</span></h2>
+                  <div className="flex gap-4">
+                     <button onClick={() => setConsoleLogs([])} className="text-[10px] font-bold uppercase tracking-widest text-gray-500 hover:text-white transition-colors">Clear Logs</button>
+                     <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white transition-colors">CLOSE [X]</button>
+                  </div>
+               </div>
+               <div className="flex flex-col gap-2 font-mono text-sm">
+                  {consoleLogs.length === 0 && <p className="text-gray-600 italic">No logs yet. Start playback to see diagnostics.</p>}
+                  {consoleLogs.map((log, i) => (
+                     <div key={i} className={`p-3 rounded border ${log.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-white/5 border-white/10 text-gray-400'}`}>
+                        <span className="opacity-50 mr-2">[{new Date().toLocaleTimeString()}]</span>
+                        {log.msg}
+                     </div>
+                  ))}
                </div>
             </div>
           )}
@@ -1301,9 +1451,9 @@ const BeatScriptApp: React.FC = () => {
                             newPattern[i] = newPattern[i] === '1' ? '0' : '1';
                             handleProjectionValueChange(newPattern.join(''));
                           }}
-                          className={`aspect-square rounded border border-white/5 cursor-pointer transition-all ${
+                          className={`aspect-square rounded border cursor-pointer transition-all ${
                             bit === '1' ? 'bg-beatscript-purple shadow-[0_0_10px_rgba(189,147,249,0.5)]' : 'bg-gray-800 hover:bg-gray-700'
-                          }`}
+                          } ${currentStep === i ? 'ring-2 ring-white border-white' : 'border-white/5'}`}
                         />
                       ))}
                     </div>
@@ -1448,14 +1598,39 @@ const BeatScriptApp: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-center p-8">
-                <div className="flex flex-col gap-4 opacity-20">
-                  <Activity size={64} className="mx-auto" />
-                  <div className="flex flex-col gap-1">
-                    <p className="text-xs font-bold uppercase tracking-wider">Awaiting Input</p>
-                    <p className="text-[10px]">Select a code block to project its interface.</p>
+              <div className="flex-1 flex flex-col gap-8">
+                {isPlaying ? (
+                   <div className="flex flex-col gap-6 animate-in fade-in duration-500">
+                      <div className="flex items-center gap-2">
+                         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                         <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Live Session Monitor</span>
+                      </div>
+                      <div className="flex flex-col gap-3">
+                         {Array.from(activeTracks).map(trackId => (
+                            <div key={trackId} className="flex items-center justify-between bg-beatscript-purple/10 border border-beatscript-purple/20 p-3 rounded-lg">
+                               <div className="flex items-center gap-3">
+                                  <Volume2 size={14} className="text-beatscript-purple" />
+                                  <span className="text-xs font-bold truncate">{trackId.split('_')[1]}</span>
+                               </div>
+                               <div className="flex gap-1">
+                                  {[1,2,3].map(i => <div key={i} className="w-1 h-3 bg-beatscript-purple rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />)}
+                                </div>
+                            </div>
+                         ))}
+                         {activeTracks.size === 0 && <p className="text-[10px] text-gray-600 italic">Silent steps...</p>}
+                      </div>
+                   </div>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-center p-8">
+                    <div className="flex flex-col gap-4 opacity-20">
+                      <Activity size={64} className="mx-auto" />
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs font-bold uppercase tracking-wider">Awaiting Input</p>
+                        <p className="text-[10px]">Select a code block to project its interface.</p>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
