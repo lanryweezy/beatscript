@@ -2,14 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as Tone from 'tone';
 import MidiWriter from 'midi-writer-js';
 import Editor, { loader } from '@monaco-editor/react';
-import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Check, Sparkles, Circle, Share2, Palette, Volume2, VolumeX, Save, FolderOpen, Trash2, Plus, ChevronLeft, ChevronRight, Dice5 } from 'lucide-react';
+import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Check, Sparkles, Circle, Share2, Palette, Volume2, VolumeX, Save, FolderOpen, Trash2, Plus, ChevronLeft, ChevronRight, Dice5, Sliders } from 'lucide-react';
 
 // --- Types ---
 interface BeatScript {
   bpm: number;
   sections: Record<string, Section>;
   synths: Record<string, SynthConfig>;
+  fxChains: Record<string, FXChainConfig>;
   timeline: string[];
+}
+
+interface FXChainConfig {
+  nodes: { type: string, params: any }[];
 }
 
 interface SynthConfig {
@@ -28,6 +33,7 @@ interface Track {
   pattern: string | string[];
   volume?: number;
   pan?: number;
+  send?: { to: string, amount: number };
 }
 
 // --- Presets ---
@@ -210,9 +216,13 @@ const BeatScriptApp: React.FC = () => {
   const [visualizerMode, setVisualizerMode] = useState<'waveform' | 'fft'>('waveform');
   const [copied, setCopied] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
   const [showDocs, setShowDocs] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMixer, setShowMixer] = useState(false);
+  const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set());
+  const [soloedTracks, setSoloedTracks] = useState<Set<string>>(new Set());
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isProjectionCollapsed, setIsProjectionCollapsed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -232,6 +242,7 @@ const BeatScriptApp: React.FC = () => {
 
   // Audio nodes
   const synths = useRef<Record<string, any>>({});
+  const fxChains = useRef<Record<string, Tone.ToneAudioNode>>({});
   const samplerRef = useRef<Tone.Sampler | null>(null);
   const analyser = useRef<Tone.Analyser | null>(null);
   const recorder = useRef<Tone.Recorder | null>(null);
@@ -343,7 +354,7 @@ const BeatScriptApp: React.FC = () => {
   const parseBeatScript = (str: string): BeatScript => {
     // Normalize whitespace for easier regex matching
     str = str.replace(/\s+/g, ' ');
-    const res: BeatScript = { bpm: 120, sections: {}, synths: {}, timeline: [] };
+    const res: BeatScript = { bpm: 120, sections: {}, synths: {}, fxChains: {}, timeline: [] };
 
     // Remove comments
     const cleanStr = str.replace(/\/\/.*$/gm, '');
@@ -353,6 +364,27 @@ const BeatScriptApp: React.FC = () => {
     if (compMatch) {
       const bpmMatch = compMatch[1].match(/bpm:\s*(\d+)/);
       if (bpmMatch) res.bpm = parseInt(bpmMatch[1], 10);
+    }
+
+    // Parse FX Chains
+    const fxMatch = Array.from(cleanStr.matchAll(/fx_chain\s+(\w+)\s*\{([^}]*)\}/g));
+    for (const match of fxMatch) {
+       const chainName = match[1];
+       const content = match[2];
+       const nodes: any[] = [];
+
+       const nodeMatches = Array.from(content.matchAll(/(\w+)\s*\{([^}]*)\}/g));
+       for (const nm of nodeMatches) {
+          const type = nm[1];
+          const paramContent = nm[2];
+          const params: any = {};
+          paramContent.split(',').forEach(p => {
+             const [k, v] = p.split(':').map(s => s.trim());
+             if (k && v) params[k] = parseFloat(v) || v.replace(/^["']|["']$/g, '');
+          });
+          nodes.push({ type, params });
+       }
+       res.fxChains[chainName] = { nodes };
     }
 
     // Parse synths
@@ -398,6 +430,9 @@ const BeatScriptApp: React.FC = () => {
 
         const panMatch = trackContent.match(/pan:\s*(-?\d+\.?\d*)/);
         if (panMatch) track.pan = parseFloat(panMatch[1]);
+
+        const sendMatch = trackContent.match(/send:\s*\{\s*to:\s*["']?(\w+)["']?,\s*amount:\s*(\d+\.?\d*)\s*\}/);
+        if (sendMatch) track.send = { to: sendMatch[1], amount: parseFloat(sendMatch[2]) };
 
         const patMatch = trackContent.match(/pattern:\s*(euclidean\([^)]*\)|["'][\d]+["']|\[[^\]]*\])/);
         if (patMatch) {
@@ -464,6 +499,8 @@ const BeatScriptApp: React.FC = () => {
       activeSequences.current.clear();
       Object.values(synths.current).forEach(s => s.dispose());
       synths.current = {};
+      Object.values(fxChains.current).forEach(n => n.dispose());
+      fxChains.current = {};
       setIsPlaying(false);
       return;
     }
@@ -496,6 +533,23 @@ const BeatScriptApp: React.FC = () => {
     Object.values(synths.current).forEach(s => s.dispose());
     synths.current = {};
 
+    // Initialize FX Chains
+    Object.entries(beat.fxChains).forEach(([name, config]: [string, any]) => {
+       const nodes = config.nodes.map((n: any) => {
+          if (n.type === 'reverb') return new Tone.Reverb(n.params);
+          if (n.type === 'delay') return new Tone.FeedbackDelay(n.params);
+          if (n.type === 'distortion') return new Tone.Distortion(n.params);
+          return new Tone.Filter(n.params);
+       });
+       if (nodes.length > 0) {
+          nodes.forEach((n, i) => {
+             if (i < nodes.length - 1) n.connect(nodes[i+1]);
+             else n.connect(analyser.current!).connect(distortion.current!).toDestination();
+          });
+          fxChains.current[name] = nodes[0];
+       }
+    });
+
     // Initialize Synths from Script
     Object.entries(beat.synths).forEach(([name, config]: [string, any]) => {
       let synth: any;
@@ -521,6 +575,10 @@ const BeatScriptApp: React.FC = () => {
         case 'mono':
           synth = new Tone.PolySynth(Tone.MonoSynth).connect(destination).connect(distortion.current!).toDestination();
           break;
+        case 'physical_model':
+        case 'pluck':
+          synth = new Tone.PluckSynth().connect(destination).connect(distortion.current!).toDestination();
+          break;
         default:
           synth = new Tone.PolySynth(Tone.Synth).connect(destination).connect(distortion.current!).toDestination();
       }
@@ -545,6 +603,11 @@ const BeatScriptApp: React.FC = () => {
         const volumeNode = new Tone.Volume(track.volume || 0).connect(analyser.current!);
         const pannerNode = new Tone.Panner(track.pan || 0).connect(volumeNode);
 
+        if (track.send && fxChains.current[track.send.to]) {
+           const sendNode = new Tone.Gain(track.send.amount).connect(fxChains.current[track.send.to]);
+           volumeNode.connect(sendNode);
+        }
+
         baseSynth.connect(pannerNode);
 
         const pattern = Array.isArray(track.pattern) ? track.pattern : track.pattern.split('');
@@ -555,6 +618,15 @@ const BeatScriptApp: React.FC = () => {
         const seq = new Tone.Sequence((time, noteOrBit) => {
           const index = stepCount % pattern.length;
           stepCount++;
+
+          // Solo/Mute logic
+          const trackId = `${sectionName}_${trackName}`;
+          const isMuted = mutedTracks.has(trackId);
+          const isSoloed = soloedTracks.has(trackId);
+          const anySoloed = soloedTracks.size > 0;
+
+          if (isMuted || (anySoloed && !isSoloed)) return;
+
           try {
             Tone.Draw.schedule(() => {
               setActiveTracks(prev => {
@@ -611,6 +683,9 @@ const BeatScriptApp: React.FC = () => {
     } else if (line.includes('frequency:')) {
       const val = parseFloat(line.split(':')[1].trim());
       setProjection({ type: 'knob', label: 'Frequency', value: val, min: 20, max: 2000, lineNumber });
+    } else if (line.includes('attack:')) {
+      const val = parseFloat(line.split(':')[1].trim());
+      setProjection({ type: 'knob', label: 'Attack', value: val, min: 0, max: 2.0, lineNumber });
     } else if (line.includes('decay:')) {
       const val = parseFloat(line.split(':')[1].trim());
       setProjection({ type: 'knob', label: 'Decay', value: val, min: 0.01, max: 4.0, lineNumber });
@@ -622,7 +697,7 @@ const BeatScriptApp: React.FC = () => {
       setProjection({ type: 'select', label: 'Oscillator', value: val, options: ['sine', 'square', 'sawtooth', 'triangle', 'fatsawtooth', 'pulse'], lineNumber });
     } else if (line.includes('type:')) {
       const val = line.split(':')[1].trim().replace(/^["']|["']$/g, '');
-      setProjection({ type: 'select', label: 'Instrument Type', value: val, options: ['membrane', 'noise', 'fm', 'mono', 'subtractive'], lineNumber });
+      setProjection({ type: 'select', label: 'Instrument Type', value: val, options: ['membrane', 'noise', 'fm', 'mono', 'subtractive', 'physical_model'], lineNumber });
     } else if (line.includes('volume:')) {
       const val = parseInt(line.split(':')[1].trim(), 10);
       setProjection({ type: 'knob', label: 'Track Volume (dB)', value: val, min: -60, max: 12, lineNumber });
@@ -726,7 +801,7 @@ const BeatScriptApp: React.FC = () => {
         if (key === 'bpm') {
           Tone.Transport.bpm.rampTo(newValue, 0.1);
           setBpm(newValue);
-        } else if (key === 'frequency' || key === 'decay' || key === 'sustain' || key === 'oscillator') {
+        } else if (key === 'frequency' || key === 'attack' || key === 'decay' || key === 'sustain' || key === 'oscillator') {
            // Find which synth this belongs to by looking up
            let currentSynth: string | null = null;
            for (let i = projection.lineNumber - 1; i >= 0; i--) {
@@ -739,6 +814,7 @@ const BeatScriptApp: React.FC = () => {
            if (currentSynth && synths.current[currentSynth]) {
              const s = synths.current[currentSynth];
              if (key === 'frequency' && s.frequency) s.frequency.value = newValue;
+             if (key === 'attack' && s.envelope) s.envelope.attack = newValue;
              if (key === 'decay' && s.envelope) s.envelope.decay = newValue;
              if (key === 'sustain' && s.envelope) s.envelope.sustain = newValue;
              if (key === 'oscillator' && s.oscillator) s.oscillator.type = newValue;
@@ -1062,6 +1138,11 @@ const BeatScriptApp: React.FC = () => {
               size={24}
               onClick={() => setShowSettings(!showSettings)}
            />
+           <Sliders
+              className={`${showMixer ? 'text-beatscript-purple' : 'text-gray-500'} hover:text-beatscript-purple cursor-pointer transition-colors`}
+              size={24}
+              onClick={() => setShowMixer(!showMixer)}
+           />
            <Activity
               className={`${showConsole ? 'text-beatscript-purple' : 'text-gray-500'} hover:text-beatscript-purple cursor-pointer transition-colors`}
               size={24}
@@ -1182,6 +1263,119 @@ const BeatScriptApp: React.FC = () => {
                </div>
             </div>
           )}
+          {showMixer && (
+            <div className="absolute inset-0 z-[60] bg-black/95 backdrop-blur-xl p-12 overflow-y-auto animate-in fade-in zoom-in duration-300">
+               <div className="flex justify-between items-center mb-12">
+                  <h2 className="text-4xl font-black italic tracking-tighter">STUDIO <span className="text-beatscript-purple">MIXER</span></h2>
+                  <button onClick={() => setShowMixer(false)} className="text-gray-500 hover:text-white transition-colors">CLOSE [X]</button>
+               </div>
+
+               <div className="flex gap-4 overflow-x-auto pb-8 min-h-[400px]">
+                  {/* Master Channel */}
+                  <div className="w-32 flex flex-col items-center bg-white/5 border border-beatscript-purple/30 rounded-2xl p-4 shrink-0 gap-6">
+                     <span className="text-[10px] font-black uppercase text-beatscript-purple tracking-widest">MASTER</span>
+                     <div className="flex-1 flex flex-col items-center gap-4">
+                        <div className="relative flex-1 flex flex-col items-center">
+                           <input
+                              type="range"
+                              min="-60" max="6" step="1"
+                              value={masterVolume}
+                              onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
+                              className="h-full w-1.5 accent-beatscript-purple bg-gray-800 rounded-full appearance-none cursor-pointer vertical-slider"
+                              style={{ writingMode: 'bt-lr' as any, appearance: 'slider-vertical' as any }}
+                           />
+                        </div>
+                        <span className="text-[10px] font-mono text-gray-500">{masterVolume}dB</span>
+                     </div>
+                     <button
+                        onClick={toggleMute}
+                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isMuted ? 'bg-red-500 text-white' : 'bg-gray-800 text-gray-500'}`}
+                     >
+                        <VolumeX size={16} />
+                     </button>
+                  </div>
+
+                  {/* Track Channels */}
+                  {(() => {
+                     const beat = parseBeatScript(script);
+                     const tracks: [string, string, any][] = []; // [section, track, config]
+                     Object.entries(beat.sections).forEach(([sName, s]) => {
+                        Object.entries(s.tracks).forEach(([tName, t]) => {
+                           tracks.push([sName, tName, t]);
+                        });
+                     });
+
+                     return tracks.map(([sName, tName, t]) => {
+                        const trackId = `${sName}_${tName}`;
+                        const isMuted = mutedTracks.has(trackId);
+                        const isSoloed = soloedTracks.has(trackId);
+
+                        return (
+                           <div key={trackId} className="w-32 flex flex-col items-center bg-white/5 border border-white/10 rounded-2xl p-4 shrink-0 gap-4">
+                              <span className="text-[10px] font-black uppercase text-gray-400 tracking-widest truncate w-full text-center" title={tName}>{tName}</span>
+                              <div className="flex-1 flex flex-col items-center gap-4">
+                                 <div className="flex flex-col items-center gap-1 w-full">
+                                    <span className="text-[8px] text-gray-600 font-bold uppercase">PAN</span>
+                                    <input
+                                       type="range"
+                                       min="-1" max="1" step="0.1"
+                                       value={t.pan || 0}
+                                       onChange={() => {
+                                          // We'll need a way to find this track in the code and update it
+                                          // For now, let's just use the projection logic if we can find the line
+                                          alert("Mixer live-sync coming in v12.7! Use Projection UI for now.");
+                                       }}
+                                       className="w-full accent-gray-500 h-1 bg-gray-800 rounded-full appearance-none cursor-pointer"
+                                    />
+                                 </div>
+                                 <div className="relative flex-1 flex flex-col items-center">
+                                    <input
+                                       type="range"
+                                       min="-60" max="12" step="1"
+                                       value={t.volume || 0}
+                                       onChange={() => {}}
+                                       className="h-full w-1.5 accent-beatscript-purple bg-gray-800 rounded-full appearance-none cursor-pointer vertical-slider"
+                                       style={{ writingMode: 'bt-lr' as any, appearance: 'slider-vertical' as any }}
+                                    />
+                                 </div>
+                                 <span className="text-[10px] font-mono text-gray-500">{t.volume || 0}dB</span>
+                              </div>
+                              <div className="flex flex-col gap-2 w-full">
+                                 <div className="flex gap-2">
+                                    <button
+                                       onClick={() => {
+                                          const next = new Set(mutedTracks);
+                                          if (next.has(trackId)) next.delete(trackId);
+                                          else next.add(trackId);
+                                          setMutedTracks(next);
+                                       }}
+                                       className={`flex-1 py-1 rounded text-[10px] font-black transition-all ${isMuted ? 'bg-orange-500 text-white' : 'bg-gray-800 text-gray-600'}`}
+                                    >
+                                       MUTE
+                                    </button>
+                                    <button
+                                       onClick={() => {
+                                          const next = new Set(soloedTracks);
+                                          if (next.has(trackId)) next.delete(trackId);
+                                          else next.add(trackId);
+                                          setSoloedTracks(next);
+                                       }}
+                                       className={`flex-1 py-1 rounded text-[10px] font-black transition-all ${isSoloed ? 'bg-yellow-500 text-black' : 'bg-gray-800 text-gray-600'}`}
+                                    >
+                                       SOLO
+                                    </button>
+                                 </div>
+                                 <div className="h-1.5 w-full bg-gray-900 rounded overflow-hidden">
+                                    <div className={`h-full transition-all duration-75 ${activeTracks.has(trackId) ? 'bg-green-500 w-full' : 'bg-transparent w-0'}`} />
+                                 </div>
+                              </div>
+                           </div>
+                        );
+                     });
+                  })()}
+               </div>
+            </div>
+          )}
           {showDocs && (
             <div className="absolute inset-0 z-[60] bg-black/95 backdrop-blur-xl p-12 overflow-y-auto animate-in fade-in zoom-in duration-300">
                <div className="flex justify-between items-center mb-12">
@@ -1238,74 +1432,65 @@ const BeatScriptApp: React.FC = () => {
             </div>
           )}
           {showTutorial && (
-            <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-sm p-12 flex flex-col gap-8 animate-in fade-in zoom-in duration-300">
+            <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-md p-12 flex flex-col gap-8 animate-in fade-in duration-300">
                <div className="flex justify-between items-center">
-                  <h2 className="text-4xl font-black italic tracking-tighter">GETTING <span className="text-beatscript-purple">STARTED</span></h2>
-                  <button onClick={() => setShowTutorial(false)} className="text-gray-500 hover:text-white transition-colors">CLOSE [X]</button>
+                  <h2 className="text-4xl font-black italic tracking-tighter">STUDIO <span className="text-beatscript-purple">QUICK TOUR</span></h2>
+                  <button onClick={() => setShowTutorial(false)} className="text-gray-500 hover:text-white transition-colors">SKIP [X]</button>
                </div>
 
-               <div className="grid grid-cols-2 gap-12">
-                  <div className="flex flex-col gap-4 group">
-                     <div className="flex justify-between items-center">
-                        <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">01. Composition</h3>
-                        <button
-                          onClick={() => setScript(`composition {\n  title: "My Track",\n  bpm: 120\n}\n`)}
-                          className="text-[10px] bg-white/5 px-2 py-1 rounded hover:bg-beatscript-purple hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          LOAD
-                        </button>
+               <div className="flex-1 flex items-center justify-center">
+                  <div className="max-w-2xl w-full flex flex-col gap-8 bg-white/5 p-12 rounded-3xl border border-white/10 shadow-2xl">
+                     <div className="flex items-center gap-6">
+                        <div className="w-16 h-16 rounded-2xl bg-beatscript-purple flex items-center justify-center text-3xl font-black">
+                           {tourStep + 1}
+                        </div>
+                        <div>
+                           <h3 className="text-2xl font-black uppercase tracking-tight">
+                              {tourStep === 0 && "The Editor"}
+                              {tourStep === 1 && "The Projection UI"}
+                              {tourStep === 2 && "The Master FX Rack"}
+                              {tourStep === 3 && "Share Your Beat"}
+                           </h3>
+                           <p className="text-gray-400 font-mono text-xs uppercase tracking-widest">
+                              Step {tourStep + 1} of 4
+                           </p>
+                        </div>
                      </div>
-                     <p className="text-gray-400 text-sm leading-relaxed">Every script starts with a <span className="text-white font-mono">composition</span> block. This is where you set the global <span className="text-white font-mono">bpm</span> (beats per minute).</p>
-                  </div>
-                  <div className="flex flex-col gap-4 group">
-                     <div className="flex justify-between items-center">
-                        <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">02. Synths</h3>
-                        <button
-                          onClick={() => setScript(script + `synth my_synth {\n  type: "membrane",\n  frequency: 50\n}\n`)}
-                          className="text-[10px] bg-white/5 px-2 py-1 rounded hover:bg-beatscript-purple hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          APPEND
-                        </button>
-                     </div>
-                     <p className="text-gray-400 text-sm leading-relaxed">Define your instruments using <span className="text-white font-mono">synth</span>. Choose a <span className="text-white font-mono">type</span> like membrane, noise, or fm.</p>
-                  </div>
-                  <div className="flex flex-col gap-4 group">
-                     <div className="flex justify-between items-center">
-                        <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">03. Sections</h3>
-                        <button
-                          onClick={() => setScript(script + `section verse {\n  length: 4\n  track kick {\n    instrument: "my_synth",\n    pattern: "1000100010001000"\n  }\n}\n`)}
-                          className="text-[10px] bg-white/5 px-2 py-1 rounded hover:bg-beatscript-purple hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          APPEND
-                        </button>
-                     </div>
-                     <p className="text-gray-400 text-sm leading-relaxed">Organize your music into <span className="text-white font-mono">section</span>s. Each section has a <span className="text-white font-mono">length</span> and contains multiple <span className="text-white font-mono">track</span>s.</p>
-                  </div>
-                  <div className="flex flex-col gap-4 group">
-                     <div className="flex justify-between items-center">
-                        <h3 className="text-beatscript-purple font-mono font-bold uppercase tracking-widest text-sm">04. Timeline</h3>
-                        <button
-                          onClick={() => setScript(script + `timeline: ["verse"]\n`)}
-                          className="text-[10px] bg-white/5 px-2 py-1 rounded hover:bg-beatscript-purple hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          APPEND
-                        </button>
-                     </div>
-                     <p className="text-gray-400 text-sm leading-relaxed">Finally, the <span className="text-white font-mono">timeline</span> tells the engine which sections to play and in what order.</p>
-                  </div>
-               </div>
 
-               <div className="mt-auto bg-beatscript-purple/10 border border-beatscript-purple/20 p-6 rounded-2xl flex items-center justify-between">
-                  <div className="flex flex-col gap-1">
-                     <p className="font-bold">Ready to drop the beat?</p>
-                     <p className="text-xs text-gray-500 italic">Try clicking on a 'bpm' or 'frequency' line to see the Projection interface.</p>
+                     <p className="text-lg leading-relaxed text-gray-300">
+                        {tourStep === 0 && "This is where the magic happens. BeatScript is a declarative language. Define your synths and patterns in code, and watch the engine bring them to life."}
+                        {tourStep === 1 && "Code is tactile. Click on any line in the editor (like 'bpm' or 'pattern') to reveal interactive controls in the Projection panel on the right."}
+                        {tourStep === 2 && "Click the 'composition' title to access the Master FX rack. Tweak filters, distortion, and reverb to shape your final sound."}
+                        {tourStep === 3 && "Every change you make is saved in the URL hash. Copy the link and share it with the world—your beat is instantly playable anywhere."}
+                     </p>
+
+                     <div className="flex justify-between items-center mt-4">
+                        <div className="flex gap-2">
+                           {[0,1,2,3].map(i => (
+                              <div key={i} className={`w-2 h-2 rounded-full transition-all ${tourStep === i ? 'bg-beatscript-purple w-6' : 'bg-gray-700'}`} />
+                           ))}
+                        </div>
+                        <div className="flex gap-4">
+                           {tourStep > 0 && (
+                              <button
+                                 onClick={() => setTourStep(tourStep - 1)}
+                                 className="px-6 py-2 rounded-full border border-white/10 text-xs font-bold hover:bg-white/5 transition-all"
+                              >
+                                 BACK
+                              </button>
+                           )}
+                           <button
+                              onClick={() => {
+                                 if (tourStep < 3) setTourStep(tourStep + 1);
+                                 else setShowTutorial(false);
+                              }}
+                              className="px-8 py-2 rounded-full bg-beatscript-purple text-xs font-black hover:scale-105 transition-all shadow-lg shadow-purple-500/20"
+                           >
+                              {tourStep < 3 ? "CONTINUE" : "GET COOKING"}
+                           </button>
+                        </div>
+                     </div>
                   </div>
-                  <button
-                    onClick={() => setShowTutorial(false)}
-                    className="bg-beatscript-purple px-8 py-3 rounded-full font-black text-sm hover:bg-purple-600 transition-all shadow-xl shadow-purple-500/20"
-                  >
-                    START CODING
-                  </button>
                </div>
             </div>
           )}
@@ -1391,6 +1576,22 @@ const BeatScriptApp: React.FC = () => {
                     <span className="text-sm font-bold text-gray-300">{projection.label}</span>
                     <span className="text-xs font-mono text-beatscript-purple bg-beatscript-purple/10 px-2 py-0.5 rounded">{projection.value}</span>
                   </div>
+
+                  {['Attack', 'Decay', 'Sustain'].includes(projection.label) && (
+                     <div className="h-20 w-full bg-black/40 rounded-lg border border-white/5 relative overflow-hidden">
+                        <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                           <path
+                              d="M 0 100 L 10 20 L 40 50 L 80 50 L 100 100"
+                              fill="rgba(139, 92, 246, 0.1)"
+                              stroke="#8b5cf6"
+                              strokeWidth="2"
+                           />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
+                           <Zap size={32} className="text-beatscript-purple" />
+                        </div>
+                     </div>
+                  )}
 
                   {projection.type === 'knob' && (
                     <div className="flex flex-col gap-4">
