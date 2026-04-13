@@ -186,7 +186,7 @@ fn unroll_pattern(pattern: &Pattern) -> Vec<NoteEvent> {
                 let val = ((i as f32 * k) / n).floor() != (((i as f32 - 1.0) * k) / n).floor();
                 if val {
                     // Apply rotation
-                    let rotated_i = (i + *rotate as u32) % *steps as u32;
+                    let rotated_i = (i as u32 + *rotate as u32) % *steps as u32;
                     notes.push(NoteEvent {
                         time_steps: rotated_i,
                         notes: vec!["C3".to_string()], // Default for Euclidean
@@ -202,7 +202,7 @@ fn unroll_pattern(pattern: &Pattern) -> Vec<NoteEvent> {
 }
 
 /// Simple utility to convert note names (e.g., "C3", "Eb4") to MIDI numbers.
-fn note_to_midi(name: &str) -> u8 {
+pub fn note_to_midi(name: &str) -> u8 {
     let mut parts = name.chars();
     let note = match parts.next() {
         Some('C') => 0,

@@ -33,7 +33,7 @@ mod tests {
                 type: "subtractive"
             }
             section main {
-                length: 4
+                length: 4,
                 track kick {
                     instrument: my_synth,
                     pattern: euclidean(3, 8, 1)

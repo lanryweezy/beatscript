@@ -136,7 +136,8 @@ impl MidiManager {
 
     pub fn convert_note_event_to_midi(&self, note_event: &NoteEvent) -> MidiEvent {
         // Convert our internal NoteEvent to MIDI
-        let midi_note = *note_event.notes.first().unwrap_or(&60).min(&127).max(&0);
+        let note_str = note_event.notes.first().map(|s| s.as_str()).unwrap_or("C3");
+        let midi_note = crate::engine::note_to_midi(note_str);
         let velocity = note_event.velocity.min(127);
         
         MidiEvent::NoteOn {

@@ -31,7 +31,7 @@ TopLevelItem: TopLevelItem = {
 };
 
 Composition: lang::Composition = {
-    "composition" "{" <items:CompositionItem*> "}" => {
+    "composition" "{" <items:Comma<CompositionItem>> "}" => {
         let mut comp = lang::Composition::default();
         for (k, v) in items {
             match k.as_str() {
@@ -55,7 +55,7 @@ Timeline: Vec<String> = {
 };
 
 Synth: lang::Synth = {
-    "synth" <name:Identifier> "{" <items:SynthItem*> "}" => {
+    "synth" <name:Identifier> "{" <items:Comma<SynthItem>> "}" => {
         let mut synth = lang::Synth { name, ..Default::default() };
         for (k, v) in items {
             match k.as_str() {
@@ -76,7 +76,7 @@ FxChain: lang::FxChain = {
 };
 
 Effect: lang::Effect = {
-    <t:Identifier> "{" <items:EffectItem*> "}" => {
+    <t:Identifier> "{" <items:Comma<EffectItem>> "}" => {
         let mut eff = lang::Effect { effect_type: t, ..Default::default() };
         for (k, v) in items {
             eff.parameters.insert(k, v);
@@ -90,7 +90,7 @@ EffectItem: (String, Value) = {
 };
 
 Section: lang::Section = {
-    "section" <name:Identifier> "{" <items:SectionItem*> "}" => {
+    "section" <name:Identifier> "{" <items:Comma<SectionItem>> "}" => {
         let mut sec = lang::Section { name, ..Default::default() };
         for item in items {
             match item {
@@ -108,7 +108,7 @@ SectionItem: SectionItem = {
 };
 
 Track: lang::Track = {
-    "track" <name:Identifier> "{" <items:TrackItem*> "}" => {
+    "track" <name:Identifier> "{" <items:Comma<TrackItem>> "}" => {
         let mut track = lang::Track { name, ..Default::default() };
         for item in items {
             match item {
