@@ -12,7 +12,7 @@ import { ProjectLibrary } from './components/studio/ProjectLibrary';
 import { StudioMixer } from './components/studio/StudioMixer';
 import { StudioHeader } from './components/studio/StudioHeader';
 
-const PRESETS = {
+const PRESETS: Record<string, string> = {
   "Neon Sunset": `composition {
   title: "Neon Sunset",
   bpm: 95
@@ -40,6 +40,58 @@ section main {
   track snare {
     instrument: "snare_synth",
     pattern: "0000100000001000"
+  }
+}
+
+timeline: ["main"]`,
+  "Berlin Underground": `composition {
+  title: "Berlin Underground",
+  bpm: 128
+}
+
+synth acid_bass {
+  type: "subtractive",
+  cutoff: 400,
+  resonance: 15,
+  attack: 0.001,
+  decay: 0.2
+}
+
+synth drum {
+  type: "membrane",
+  decay: 0.15
+}
+
+section main {
+  length: 4
+  track bassline {
+    instrument: "acid_bass",
+    pattern: [C2, C2, C3, _, C2, _, C3, _, C2, C2, C3, _, C2, Eb2, F2, _]
+  }
+  track kick {
+    instrument: "drum",
+    pattern: "1000100010001000"
+  }
+}
+
+timeline: ["main"]`,
+  "Euclidean Magic": `composition {
+  title: "Euclidean Magic",
+  bpm: 120
+}
+
+synth kick { type: "membrane" }
+synth hat { type: "noise", decay: 0.05 }
+
+section main {
+  length: 4
+  track kick {
+    instrument: "kick",
+    pattern: euclidean(3, 8)
+  }
+  track hihat {
+    instrument: "hat",
+    pattern: euclidean(5, 8)
   }
 }
 
