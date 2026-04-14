@@ -21,14 +21,14 @@ BeatScript is a declarative, domain-specific language (DSL) designed for music c
 
 This repository contains two main implementations of BeatScript:
 
-1.  **BeatScript Web (Legacy/Demo):** A simple browser-based player using Tone.js (currently being upgraded to a modern React/TypeScript application).
-2.  **BeatScript Cosmos:** A next-generation high-performance audio engine written in Rust, featuring a projectional IDE.
+1.  **BeatScript Web Studio:** A modern React/TypeScript IDE and performance environment. Features "Projection" visualizers, MIDI/WAV export, and session sharing.
+2.  **BeatScript Cosmos:** A high-performance native audio engine and IDE written in Rust, optimized for low-latency live coding.
 
 ## Quick Start
 
 ### 🎹 For Musicians (No Coding Required)
-1.  **Launch the Studio:** [Link to hosted version or local dev server]
-2.  **Pick a Vibe:** Use the dropdown at the top to load a preset like "Neon Sunset" or "Deep Techno".
+1.  **Launch the Studio:** [Open the Hosted Studio](https://beatscript.io) (or run locally).
+2.  **Pick a Vibe:** Load a preset like "Neon Sunset" or "Berlin Underground" from the Library.
 3.  **Hit PLAY:** Experience the algorithmic magic.
 4.  **Tweak:** Click on patterns or synth parameters in the code; use the "Projection" sliders on the right to shape your sound in real-time.
 5.  **Record:** Hit the Record button to save your session as a high-quality audio file.
@@ -49,10 +49,10 @@ This repository contains two main implementations of BeatScript:
     *Prerequisites: `libasound2-dev` on Linux.*
 
 4.  **CLI Tools:**
-    Validate your scripts using the new `beatscript-cli`:
+    Validate your scripts using the `beatscript-cli`:
     ```bash
-    cd beatscript-cli
-    cargo run -- validate ../examples/ambient_space.beat
+    cd beatscript-cosmos
+    cargo run --bin beatscript-cli -- validate ../examples/acid_techno.beat
     ```
 
 ## Modern Features for Mass Adoption
