@@ -2,7 +2,7 @@ export interface BeatScript {
   bpm: number;
   sections: Record<string, Section>;
   synths: Record<string, SynthConfig>;
-  fxChains: Record<string, FXChainConfig>;
+  fx_chains?: Record<string, any[]>;
   timeline: string[];
 }
 

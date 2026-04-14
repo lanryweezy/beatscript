@@ -32,6 +32,10 @@ synth snare_synth {
   attack: 0.005
 }
 
+fx_chain room {
+  reverb { roomSize: 0.7, wet: 0.4 }
+}
+
 section main {
   length: 4
   track kick {
@@ -40,6 +44,7 @@ section main {
   }
   track snare {
     instrument: "snare_synth",
+    send: { to: "room", amount: 0.5 },
     pattern: "0000100000001000"
   }
 }
@@ -127,6 +132,7 @@ const BeatScriptApp: React.FC = () => {
 
   const editorRef = useRef<any>(null);
   const synths = useRef<Record<string, any>>({});
+  const effects = useRef<Record<string, any>>({});
   const analyser = useRef<Tone.Analyser | null>(null);
   const limiter = useRef<Tone.Limiter | null>(null);
   const recorder = useRef<Tone.Recorder | null>(null);
@@ -232,6 +238,23 @@ const BeatScriptApp: React.FC = () => {
     const beat = parseResult.data!;
     setBpmState(beat.bpm);
     Tone.Transport.bpm.value = beat.bpm;
+
+    // Instantiate FX Chains
+    if (beat.fx_chains) {
+      Object.entries(beat.fx_chains).forEach(([name, chain]: [string, any[]]) => {
+        const nodes = chain.map(fx => {
+          if (fx.type === 'reverb') return new Tone.Reverb({ roomSize: fx.roomSize || 0.5, wet: fx.wet || 1 });
+          if (fx.type === 'delay') return new Tone.FeedbackDelay({ delayTime: fx.delayTime || 0.25, feedback: fx.feedback || 0.5, wet: fx.wet || 1 });
+          return null;
+        }).filter(n => n !== null);
+        if (nodes.length > 0) {
+           nodes[nodes.length-1].connect(analyser.current!);
+           for(let i=0; i<nodes.length-1; i++) nodes[i].connect(nodes[i+1]);
+           effects.current[name] = nodes[0];
+        }
+      });
+    }
+
     Object.entries(beat.synths).forEach(([name, config]: [string, any]) => {
       let synth: any;
       const dest = analyser.current!;
@@ -258,6 +281,12 @@ const BeatScriptApp: React.FC = () => {
         const baseSynth = synths.current[track.instrument];
         if (!baseSynth) return;
         const pattern = Array.isArray(track.pattern) ? track.pattern : track.pattern.split('');
+        // Setup Sends
+        if (track.send && effects.current[track.send.to]) {
+           const sendNode = new Tone.Gain(track.send.amount).connect(effects.current[track.send.to]);
+           baseSynth.connect(sendNode);
+        }
+
         const seq = new Tone.Sequence((time, noteOrBit) => {
           Tone.Draw.schedule(() => {
             setCurrentStep((prev) => (prev + 1) % pattern.length);

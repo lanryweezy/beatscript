@@ -16,6 +16,10 @@ export const TrackSchema = z.object({
   pattern: z.union([z.string(), z.array(z.union([z.string(), z.array(z.string())]))]),
   volume: z.number().optional(),
   pan: z.number().min(-1).max(1).optional(),
+  send: z.object({
+    to: z.string(),
+    amount: z.number().min(0).max(1)
+  }).optional(),
 });
 
 export const SectionSchema = z.object({
@@ -28,4 +32,5 @@ export const BeatScriptSchema = z.object({
   synths: z.record(z.string(), SynthSchema),
   sections: z.record(z.string(), SectionSchema),
   timeline: z.array(z.string()),
+  fx_chains: z.record(z.string(), z.array(z.any())).optional(),
 });

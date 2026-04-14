@@ -38,6 +38,29 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
       if (bpmMatch) rawData.bpm = parseInt(bpmMatch[1], 10);
     }
 
+    // FX Chains
+    const fxMatch = Array.from(cleanStr.matchAll(/fx_chain\s+(\w+)\s*\{([^}]*)\}/g));
+    for (const match of fxMatch) {
+      const chainName = match[1];
+      const content = match[2];
+      const effects: any[] = [];
+
+      const effMatch = Array.from(content.matchAll(/(\w+)\s*\{([^}]*)\}/g));
+      for (const eM of effMatch) {
+        const type = eM[1];
+        const eContent = eM[2];
+        const params: any = {};
+        const pList = ['roomSize', 'dampening', 'delayTime', 'feedback', 'wet'];
+        pList.forEach(p => {
+           const m = eContent.match(new RegExp(`${p}:\\s*(\\d+\\.?\\d*)`));
+           if (m) params[p] = parseFloat(m[1]);
+        });
+        effects.push({ type, ...params });
+      }
+      rawData.fx_chains = rawData.fx_chains || {};
+      rawData.fx_chains[chainName] = effects;
+    }
+
     // Synths
     const synthsMatch = Array.from(cleanStr.matchAll(/synth\s+(\w+)\s*\{([^}]*)\}/g));
     for (const match of synthsMatch) {
@@ -81,6 +104,9 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
 
         const panM = tContent.match(/pan:\s*(-?\d+\.?\d*)/);
         if (panM) track.pan = parseFloat(panM[1]);
+
+        const sendM = tContent.match(/send:\s*\{\s*to:\s*["']?(\w+)["']?,\s*amount:\s*(\d+\.?\d*)\s*\}/);
+        if (sendM) track.send = { to: sendM[1], amount: parseFloat(sendM[2]) };
 
         const patM = tContent.match(/pattern:\s*(euclidean\([^)]*\)|["'][\d]+["']|\[[^\]]*\])/);
         if (patM) {
