@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 
 import { parseBeatScriptEnhanced } from './core/parser_v2';
+import { exportToMidi } from './core/midi_export';
 import { ADSRVisualizer } from './components/studio/ADSRVisualizer';
 import { EuclideanCircle } from './components/studio/EuclideanCircle';
 import { ProjectLibrary } from './components/studio/ProjectLibrary';
@@ -106,6 +107,7 @@ const BeatScriptApp: React.FC = () => {
   });
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [bpmState, setBpmState] = useState(95);
   const [projection, setProjection] = useState<any>(null);
   const [visualizerData, setVisualizerData] = useState<number[]>(new Array(32).fill(0));
@@ -124,10 +126,14 @@ const BeatScriptApp: React.FC = () => {
   const editorRef = useRef<any>(null);
   const synths = useRef<Record<string, any>>({});
   const analyser = useRef<Tone.Analyser | null>(null);
+  const recorder = useRef<Tone.Recorder | null>(null);
   const activeSequences = useRef<Map<string, Tone.Sequence>>(new Map());
 
   useEffect(() => {
     analyser.current = new Tone.Analyser('waveform', 32);
+    recorder.current = new Tone.Recorder();
+    Tone.Destination.connect(recorder.current);
+
     const interval = setInterval(() => {
       if (analyser.current && isPlaying) {
         const values = analyser.current.getValue() as Float32Array;
@@ -192,6 +198,15 @@ const BeatScriptApp: React.FC = () => {
 
   const handleTogglePlay = async () => {
     if (isPlaying) {
+      if (isRecording && recorder.current) {
+         const blob = await recorder.current.stop();
+         const url = URL.createObjectURL(blob);
+         const anchor = document.createElement("a");
+         anchor.download = "recording.webm";
+         anchor.href = url;
+         anchor.click();
+         setIsRecording(false);
+      }
       Tone.Transport.stop();
       Tone.Transport.cancel();
       activeSequences.current.forEach(s => s.dispose());
@@ -255,10 +270,35 @@ const BeatScriptApp: React.FC = () => {
     setIsPlaying(true);
   };
 
+  const handleToggleRecord = async () => {
+     if (isRecording) {
+        handleTogglePlay(); // Stop everything
+        return;
+     }
+     if (!isPlaying) {
+        await handleTogglePlay();
+     }
+     if (recorder.current) {
+        recorder.current.start();
+        setIsRecording(true);
+     }
+  };
+
   const saveProject = (name: string) => {
      const next = { ...projects, [name]: script };
      setProjects(next);
      localStorage.setItem('beatscript_projects', JSON.stringify(next));
+  };
+
+  const handleMidiExport = () => {
+     const res = parseBeatScriptEnhanced(script);
+     if (res.data) {
+        const uri = exportToMidi(res.data);
+        const link = document.createElement('a');
+        link.href = uri;
+        link.download = `${res.data.title || 'composition'}.mid`;
+        link.click();
+     }
   };
 
   const loadProject = (name: string) => {
@@ -332,7 +372,8 @@ const BeatScriptApp: React.FC = () => {
             </div>
             <div className="flex gap-4">
                <button onClick={() => { const n = prompt("Save as?"); if(n) saveProject(n); }} className="hover:text-white flex items-center gap-1 uppercase tracking-widest"><Save size={10}/> Save</button>
-               <button className="hover:text-white flex items-center gap-1 uppercase tracking-widest"><Download size={10}/> Export</button>
+               <button onClick={handleMidiExport} className="hover:text-white flex items-center gap-1 uppercase tracking-widest"><Download size={10}/> MIDI</button>
+               <button onClick={handleToggleRecord} className={`${isRecording ? 'text-red-500 animate-pulse' : 'hover:text-white'} flex items-center gap-1 uppercase tracking-widest`}><Activity size={10}/> {isRecording ? 'Rec...' : 'WAV'}</button>
             </div>
           </div>
           <div className="flex-1 relative">
