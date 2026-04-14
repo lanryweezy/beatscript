@@ -104,10 +104,13 @@ section main {
 timeline: ["main"]`
 };
 
+const toBase64 = (str: string) => btoa(unescape(encodeURIComponent(str)));
+const fromBase64 = (str: string) => decodeURIComponent(escape(atob(str)));
+
 const BeatScriptApp: React.FC = () => {
   const [script, setScript] = useState(() => {
     const hash = window.location.hash.slice(1);
-    if (hash) { try { return atob(hash); } catch (e) { } }
+    if (hash) { try { return fromBase64(hash); } catch (e) { } }
     const lastSession = localStorage.getItem('beatscript_last_session');
     if (lastSession) return lastSession;
     return PRESETS["Neon Sunset"];
@@ -203,7 +206,7 @@ const BeatScriptApp: React.FC = () => {
       lines[projection.lineNumber - 1] = `${indent}${key}: ${typeof newValue === 'string' && key === 'pattern' ? `"${newValue}"` : newValue}`;
       const newScript = lines.join('\n');
       setScript(newScript);
-      window.history.replaceState(null, '', `#${btoa(newScript)}`);
+      window.history.replaceState(null, '', `#${toBase64(newScript)}`);
       updateProjection(lines[projection.lineNumber - 1], projection.lineNumber, newScript);
     }
   };
@@ -340,7 +343,7 @@ const BeatScriptApp: React.FC = () => {
      const s = projects[name];
      if (s) {
         setScript(s);
-        window.history.replaceState(null, '', `#${btoa(s)}`);
+        window.history.replaceState(null, '', `#${toBase64(s)}`);
         setShowLibrary(false);
      }
   };
@@ -421,7 +424,7 @@ const BeatScriptApp: React.FC = () => {
                  const newS = v || '';
                  setScript(newS);
                  localStorage.setItem('beatscript_last_session', newS);
-                 window.history.replaceState(null, '', `#${btoa(newS)}`);
+                 window.history.replaceState(null, '', `#${toBase64(newS)}`);
                  if (editorRef.current && projection) {
                     const line = editorRef.current.getModel().getLineContent(projection.lineNumber);
                     updateProjection(line, projection.lineNumber, newS);
