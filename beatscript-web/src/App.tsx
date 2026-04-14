@@ -102,7 +102,9 @@ timeline: ["main"]`
 const BeatScriptApp: React.FC = () => {
   const [script, setScript] = useState(() => {
     const hash = window.location.hash.slice(1);
-    if (hash) { try { return atob(hash); } catch (e) { return PRESETS["Neon Sunset"]; } }
+    if (hash) { try { return atob(hash); } catch (e) { } }
+    const lastSession = localStorage.getItem('beatscript_last_session');
+    if (lastSession) return lastSession;
     return PRESETS["Neon Sunset"];
   });
 
@@ -126,11 +128,15 @@ const BeatScriptApp: React.FC = () => {
   const editorRef = useRef<any>(null);
   const synths = useRef<Record<string, any>>({});
   const analyser = useRef<Tone.Analyser | null>(null);
+  const limiter = useRef<Tone.Limiter | null>(null);
   const recorder = useRef<Tone.Recorder | null>(null);
   const activeSequences = useRef<Map<string, Tone.Sequence>>(new Map());
 
   useEffect(() => {
     analyser.current = new Tone.Analyser('waveform', 32);
+    limiter.current = new Tone.Limiter(-1).toDestination();
+    analyser.current.connect(limiter.current);
+
     recorder.current = new Tone.Recorder();
     Tone.Destination.connect(recorder.current);
 
@@ -230,17 +236,17 @@ const BeatScriptApp: React.FC = () => {
       let synth: any;
       const dest = analyser.current!;
       switch (config.type) {
-        case 'membrane': synth = new Tone.MembraneSynth().connect(dest).toDestination(); break;
-        case 'noise': synth = new Tone.NoiseSynth({ envelope: { decay: config.decay || 0.1 } }).connect(dest).toDestination(); break;
-        case 'fm': synth = new Tone.PolySynth(Tone.FMSynth).connect(dest).toDestination(); break;
-        case 'mono': synth = new Tone.PolySynth(Tone.MonoSynth).connect(dest).toDestination(); break;
-        case 'pluck': synth = new Tone.PluckSynth().connect(dest).toDestination(); break;
+        case 'membrane': synth = new Tone.MembraneSynth().connect(dest); break;
+        case 'noise': synth = new Tone.NoiseSynth({ envelope: { decay: config.decay || 0.1 } }).connect(dest); break;
+        case 'fm': synth = new Tone.PolySynth(Tone.FMSynth).connect(dest); break;
+        case 'mono': synth = new Tone.PolySynth(Tone.MonoSynth).connect(dest); break;
+        case 'pluck': synth = new Tone.PluckSynth().connect(dest); break;
         case 'subtractive': {
-           const filter = new Tone.Filter(config.cutoff || 20000, "lowpass").connect(dest).toDestination();
+           const filter = new Tone.Filter(config.cutoff || 20000, "lowpass").connect(dest);
            synth = new Tone.PolySynth(Tone.Synth).connect(filter);
            break;
         }
-        default: synth = new Tone.PolySynth(Tone.Synth).connect(dest).toDestination();
+        default: synth = new Tone.PolySynth(Tone.Synth).connect(dest);
       }
       if (config.decay && synth.envelope) synth.envelope.decay = config.decay;
       synths.current[name] = synth;
@@ -385,6 +391,7 @@ const BeatScriptApp: React.FC = () => {
               onChange={(v) => {
                  const newS = v || '';
                  setScript(newS);
+                 localStorage.setItem('beatscript_last_session', newS);
                  window.history.replaceState(null, '', `#${btoa(newS)}`);
                  if (editorRef.current && projection) {
                     const line = editorRef.current.getModel().getLineContent(projection.lineNumber);

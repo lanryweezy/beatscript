@@ -11,22 +11,22 @@ BeatScript has evolved from a simple rhythmic DSL into a multi-platform music pr
 *   **Improvement:** Implement a formal PEG or LR parser in TypeScript to match the Rust engine's precision.
 
 ### 2. Audio Engine (Web)
-*   **Strengths:** Leveraging Tone.js provides excellent browser compatibility and a rich set of built-in synths/FX.
-*   **Weaknesses:** No master dynamics processing (compression/limiting) leads to digital clipping when multiple tracks peak. Instrument hot-swapping is functional but lacks smooth crossfading.
-*   **Improvement:** Add a Master FX rack with a brick-wall limiter and multiband compressor.
+*   **Strengths:** Leveraging Tone.js provides excellent browser compatibility. **v12.5 now includes a Master Limiter.**
+*   **Weaknesses:** Instrument hot-swapping is functional but lacks smooth crossfading.
+*   **Improvement:** Add a multiband compressor and sidechain support.
 
 ### 3. User Experience (Studio)
-*   **Strengths:** The "Projection" UI is a powerful bridge between code and tactile control. LocalStorage persistence and URL-sharing facilitate rapid iteration.
-*   **Weaknesses:** Lack of visual feedback for MIDI input. No way to "solo" or "mute" tracks directly from the code or UI without editing the script.
-*   **Improvement:** Add visual MIDI activity indicators and an interactive Mixer panel in the Projection area.
+*   **Strengths:** The "Projection" UI is a powerful bridge between code and tactile control. **v12.5 includes Auto-Save, MIDI/WAV export, and URL-sharing.**
+*   **Weaknesses:** Lack of visual feedback for MIDI input.
+*   **Improvement:** Add visual MIDI activity indicators.
 
 ---
 
 ## Roadmap for Mass Adoption (v13.0.0)
 
 ### Phase 1: Stability & Sound (The "Pro" Update)
-- [ ] **Master Dynamics**: Integrated Limiter/Compressor to ensure 0dB ceiling.
-- [ ] **Smoother Synthesis**: Polyphonic crossfading and ADSR visualizers.
+- [x] **Master Dynamics**: Integrated Limiter to ensure 0dB ceiling.
+- [x] **Smoother Synthesis**: ADSR visualizers implemented.
 - [ ] **Harden Parser**: Move to a formal grammar-based parser for the Web IDE.
 
 ### Phase 2: Community & Collaboration
