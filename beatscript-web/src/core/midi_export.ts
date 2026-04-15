@@ -5,8 +5,6 @@ import type { BeatScript } from './types';
  * Converts a BeatScript project to a MIDI file (base64 data URI).
  */
 export const exportToMidi = (project: BeatScript): string => {
-  const trackObjects: MidiWriter.Track[] = [];
-
   // Map instrument names to track indices for simplicity
   const instrumentTracks: Record<string, MidiWriter.Track> = {};
 

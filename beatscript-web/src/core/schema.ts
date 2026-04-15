@@ -28,6 +28,8 @@ export const SectionSchema = z.object({
 });
 
 export const BeatScriptSchema = z.object({
+  title: z.string().optional(),
+  artist: z.string().optional(),
   bpm: z.number().min(20).max(300),
   synths: z.record(z.string(), SynthSchema),
   sections: z.record(z.string(), SectionSchema),

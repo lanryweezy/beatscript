@@ -34,8 +34,15 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
     // Composition
     const compMatch = cleanStr.match(/composition\s*\{([^}]*)\}/);
     if (compMatch) {
-      const bpmMatch = compMatch[1].match(/bpm:\s*(\d+)/);
+      const content = compMatch[1];
+      const bpmMatch = content.match(/bpm:\s*(\d+)/);
       if (bpmMatch) rawData.bpm = parseInt(bpmMatch[1], 10);
+
+      const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
+      if (titleMatch) rawData.title = titleMatch[1];
+
+      const artistMatch = content.match(/artist:\s*["']([^"']+)["']/);
+      if (artistMatch) rawData.artist = artistMatch[1];
     }
 
     // FX Chains

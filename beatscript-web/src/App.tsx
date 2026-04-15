@@ -246,10 +246,10 @@ const BeatScriptApp: React.FC = () => {
     if (beat.fx_chains) {
       Object.entries(beat.fx_chains).forEach(([name, chain]: [string, any[]]) => {
         const nodes = chain.map(fx => {
-          if (fx.type === 'reverb') return new Tone.Reverb({ roomSize: fx.roomSize || 0.5, wet: fx.wet || 1 });
+          if (fx.type === 'reverb') return new Tone.Reverb({ wet: fx.wet || 1 });
           if (fx.type === 'delay') return new Tone.FeedbackDelay({ delayTime: fx.delayTime || 0.25, feedback: fx.feedback || 0.5, wet: fx.wet || 1 });
           return null;
-        }).filter(n => n !== null);
+        }).filter((n): n is any => n !== null);
         if (nodes.length > 0) {
            nodes[nodes.length-1].connect(analyser.current!);
            for(let i=0; i<nodes.length-1; i++) nodes[i].connect(nodes[i+1]);

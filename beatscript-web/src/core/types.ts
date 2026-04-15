@@ -1,4 +1,6 @@
 export interface BeatScript {
+  title?: string;
+  artist?: string;
   bpm: number;
   sections: Record<string, Section>;
   synths: Record<string, SynthConfig>;

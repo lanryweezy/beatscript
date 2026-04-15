@@ -136,6 +136,9 @@ Pattern: lang::Pattern = {
         let rotate = r.map(|(_, val)| val as u8).unwrap_or(0);
         lang::Pattern::Euclidean { hits: h as u8, steps: s as u8, rotate }
     },
+    <s:String> => {
+        lang::Pattern::Binary(s)
+    },
     "[" <v:Comma<PatternStep>> "]" => lang::Pattern::Notes(v.into_iter().enumerate().flat_map(|(i, steps)| {
         steps.into_iter().map(move |notes| lang::NoteEvent {
             time_steps: i as u32,

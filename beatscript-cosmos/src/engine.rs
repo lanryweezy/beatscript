@@ -177,6 +177,20 @@ impl SectionPlayer {
 
 fn unroll_pattern(pattern: &Pattern) -> Vec<NoteEvent> {
     match pattern {
+        Pattern::Binary(s) => {
+            let mut notes = vec![];
+            for (i, char) in s.chars().enumerate() {
+                if char == '1' {
+                    notes.push(NoteEvent {
+                        time_steps: i as u32,
+                        notes: vec!["C3".to_string()],
+                        velocity: 100,
+                        duration_steps: 1,
+                    });
+                }
+            }
+            notes
+        },
         Pattern::Notes(notes) => notes.clone(),
         Pattern::Euclidean { hits, steps, rotate } => {
             let mut notes = vec![];
