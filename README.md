@@ -55,6 +55,18 @@ This repository contains two main implementations of BeatScript:
     cargo run --bin beatscript-cli -- validate ../examples/acid_techno.beat
     ```
 
+## 🚀 Instant Deployment
+
+BeatScript is designed for zero-config deployments. You can deploy the Web Studio instantly:
+
+### Option 1: Vercel / Netlify (Recommended)
+1.  Connect your GitHub repository to [Vercel](https://vercel.com) or [Netlify](https://netlify.com).
+2.  Set the **Root Directory** to `beatscript-web`.
+3.  The **Build Command** and **Output Directory** will be detected automatically (`npm run build` and `dist`).
+
+### Option 2: GitHub Pages
+This project includes a pre-configured GitHub Action (`.github/workflows/deploy.yml`). Simply push your changes to `main`, and your Studio will be live at `https://<your-username>.github.io/beatscript`.
+
 ## Modern Features for Mass Adoption
 
 - **Euclidean Rhythm Generator:** Create complex, mathematical beats with `euclidean(hits, steps, rotate)`.

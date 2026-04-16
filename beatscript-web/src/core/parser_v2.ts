@@ -21,6 +21,34 @@ export interface ParseResult {
 }
 
 /**
+ * Finds the content of a balanced block starting after a given keyword.
+ * Returns [fullMatch, content, remainingIndex]
+ */
+const findBalancedBlock = (str: string, startIndex: number): [string, string, number] | null => {
+  const openingBraceIdx = str.indexOf('{', startIndex);
+  if (openingBraceIdx === -1) return null;
+
+  let depth = 0;
+  let blockEnd = -1;
+
+  for (let i = openingBraceIdx; i < str.length; i++) {
+    if (str[i] === '{') depth++;
+    else if (str[i] === '}') depth--;
+
+    if (depth === 0) {
+      blockEnd = i;
+      break;
+    }
+  }
+
+  if (blockEnd === -1) return null;
+
+  const fullMatch = str.slice(startIndex, blockEnd + 1);
+  const content = str.slice(openingBraceIdx + 1, blockEnd);
+  return [fullMatch, content, blockEnd + 1];
+};
+
+/**
  * High-Performance BeatScript Parser (v12.9)
  * Using block isolation and Zod schema validation.
  */
@@ -32,30 +60,51 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
     const rawData: any = { bpm: 120, synths: {}, sections: {}, timeline: [] };
 
     // Composition
-    const compMatch = cleanStr.match(/composition\s*\{([^}]*)\}/);
-    if (compMatch) {
-      const content = compMatch[1];
-      const bpmMatch = content.match(/bpm:\s*(\d+)/);
-      if (bpmMatch) rawData.bpm = parseInt(bpmMatch[1], 10);
+    const compStart = cleanStr.indexOf('composition');
+    if (compStart !== -1) {
+      const block = findBalancedBlock(cleanStr, compStart);
+      if (block) {
+        const content = block[1];
+        const bpmMatch = content.match(/bpm:\s*(\d+)/);
+        if (bpmMatch) rawData.bpm = parseInt(bpmMatch[1], 10);
 
-      const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
-      if (titleMatch) rawData.title = titleMatch[1];
+        const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
+        if (titleMatch) rawData.title = titleMatch[1];
 
-      const artistMatch = content.match(/artist:\s*["']([^"']+)["']/);
-      if (artistMatch) rawData.artist = artistMatch[1];
+        const artistMatch = content.match(/artist:\s*["']([^"']+)["']/);
+        if (artistMatch) rawData.artist = artistMatch[1];
+      }
     }
 
     // FX Chains
-    const fxMatch = Array.from(cleanStr.matchAll(/fx_chain\s+(\w+)\s*\{([^}]*)\}/g));
-    for (const match of fxMatch) {
-      const chainName = match[1];
-      const content = match[2];
+    let searchIdx = 0;
+    while (true) {
+      const fxStart = cleanStr.indexOf('fx_chain', searchIdx);
+      if (fxStart === -1) break;
+
+      const block = findBalancedBlock(cleanStr, fxStart);
+      if (!block) {
+        searchIdx = fxStart + 8;
+        continue;
+      }
+
+      const header = cleanStr.slice(fxStart, cleanStr.indexOf('{', fxStart));
+      const chainName = header.replace('fx_chain', '').trim();
+      const content = block[1];
       const effects: any[] = [];
 
-      const effMatch = Array.from(content.matchAll(/(\w+)\s*\{([^}]*)\}/g));
-      for (const eM of effMatch) {
-        const type = eM[1];
-        const eContent = eM[2];
+      let eIdx = 0;
+      while (true) {
+        // Find next effect by looking for "word {"
+        const eMatch = content.slice(eIdx).match(/(\w+)\s*\{/);
+        if (!eMatch) break;
+
+        const relativeEStart = eMatch.index!;
+        const eBlock = findBalancedBlock(content, eIdx + relativeEStart);
+        if (!eBlock) break;
+
+        const type = eMatch[1];
+        const eContent = eBlock[1];
         const params: any = {};
         const pList = ['roomSize', 'dampening', 'delayTime', 'feedback', 'wet'];
         pList.forEach(p => {
@@ -63,16 +112,29 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
            if (m) params[p] = parseFloat(m[1]);
         });
         effects.push({ type, ...params });
+        eIdx = content.indexOf(eBlock[0], eIdx + relativeEStart) + eBlock[0].length;
       }
+
       rawData.fx_chains = rawData.fx_chains || {};
       rawData.fx_chains[chainName] = effects;
+      searchIdx = block[2];
     }
 
     // Synths
-    const synthsMatch = Array.from(cleanStr.matchAll(/synth\s+(\w+)\s*\{([^}]*)\}/g));
-    for (const match of synthsMatch) {
-      const name = match[1];
-      const content = match[2];
+    searchIdx = 0;
+    while (true) {
+      const synthStart = cleanStr.indexOf('synth', searchIdx);
+      if (synthStart === -1) break;
+
+      const block = findBalancedBlock(cleanStr, synthStart);
+      if (!block) {
+        searchIdx = synthStart + 5;
+        continue;
+      }
+
+      const header = cleanStr.slice(synthStart, cleanStr.indexOf('{', synthStart));
+      const name = header.replace('synth', '').trim();
+      const content = block[1];
       const config: any = { type: 'subtractive' };
 
       const typeM = content.match(/type:\s*["']?(\w+)["']?/);
@@ -85,22 +147,41 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
       });
 
       rawData.synths[name] = config;
+      searchIdx = block[2];
     }
 
     // Sections
-    const sectionsMatch = Array.from(cleanStr.matchAll(/section\s+(\w+)\s*\{([^}]*)\}/g));
-    for (const match of sectionsMatch) {
-      const sectionName = match[1];
-      const content = match[2];
+    searchIdx = 0;
+    while (true) {
+      const sectionStart = cleanStr.indexOf('section', searchIdx);
+      if (sectionStart === -1) break;
+
+      const block = findBalancedBlock(cleanStr, sectionStart);
+      if (!block) {
+        searchIdx = sectionStart + 7;
+        continue;
+      }
+
+      const header = cleanStr.slice(sectionStart, cleanStr.indexOf('{', sectionStart));
+      const sectionName = header.replace('section', '').trim();
+      const content = block[1];
       const section: any = { length: 4, tracks: {} };
 
       const lenM = content.match(/length:\s*(\d+)/);
       if (lenM) section.length = parseInt(lenM[1], 10);
 
-      const tracksMatch = Array.from(content.matchAll(/track\s+(\w+)\s*\{([^}]*)\}/g));
-      for (const tMatch of tracksMatch) {
+      // Tracks inside section
+      let tIdx = 0;
+      while (true) {
+        const tMatch = content.slice(tIdx).match(/track\s+(\w+)\s*\{/);
+        if (!tMatch) break;
+
+        const relativeTStart = tMatch.index!;
+        const tBlock = findBalancedBlock(content, tIdx + relativeTStart);
+        if (!tBlock) break;
+
         const trackName = tMatch[1];
-        const tContent = tMatch[2];
+        const tContent = tBlock[1];
         const track: any = { instrument: 'default' };
 
         const instM = tContent.match(/instrument:\s*["']?(\w+)["']?/);
@@ -173,8 +254,11 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
           track.pattern = "";
         }
         section.tracks[trackName] = track;
+        tIdx = content.indexOf(tBlock[0], tIdx + relativeTStart) + tBlock[0].length;
       }
+
       rawData.sections[sectionName] = section;
+      searchIdx = block[2];
     }
 
     // Timeline
