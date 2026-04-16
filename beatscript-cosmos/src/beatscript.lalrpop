@@ -1,11 +1,10 @@
-// LALRPOP Grammar for a more expressive BeatScript
+// LALRPOP Grammar for a more expressive BeatScript V12
 
 use crate::lang::{self, TopLevelItem, SectionItem, TrackItem, Value};
 use std::collections::HashMap;
 
 grammar;
 
-// The parser will produce a Project struct.
 pub Project: lang::Project = {
     <items:TopLevelItem*> => {
         let mut proj = lang::Project::default();
@@ -31,7 +30,7 @@ TopLevelItem: TopLevelItem = {
 };
 
 Composition: lang::Composition = {
-    "composition" "{" <items:Comma<CompositionItem>> "}" => {
+    "composition" "{" <items:CompositionItem*> "}" => {
         let mut comp = lang::Composition::default();
         for (k, v) in items {
             match k.as_str() {
@@ -47,15 +46,19 @@ Composition: lang::Composition = {
 };
 
 CompositionItem: (String, Value) = {
-    <k:Identifier> ":" <v:Literal> => (k, v),
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
 };
 
 Timeline: Vec<String> = {
-    "timeline" ":" "[" <v:Comma<Identifier>> "]" => v,
+    "timeline" ":" "[" <v:IdentifierList> "]" => v,
+};
+
+IdentifierList: Vec<String> = {
+    <v:(<Identifier> Separator?)*> => v
 };
 
 Synth: lang::Synth = {
-    "synth" <name:Identifier> "{" <items:Comma<SynthItem>> "}" => {
+    "synth" <name:Identifier> "{" <items:SynthItem*> "}" => {
         let mut synth = lang::Synth { name, ..Default::default() };
         for (k, v) in items {
             match k.as_str() {
@@ -68,7 +71,7 @@ Synth: lang::Synth = {
 };
 
 SynthItem: (String, Value) = {
-    <k:Identifier> ":" <v:Literal> => (k, v),
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
 };
 
 FxChain: lang::FxChain = {
@@ -76,7 +79,7 @@ FxChain: lang::FxChain = {
 };
 
 Effect: lang::Effect = {
-    <t:Identifier> "{" <items:Comma<EffectItem>> "}" => {
+    <t:Identifier> "{" <items:EffectItem*> "}" => {
         let mut eff = lang::Effect { effect_type: t, ..Default::default() };
         for (k, v) in items {
             eff.parameters.insert(k, v);
@@ -86,11 +89,11 @@ Effect: lang::Effect = {
 };
 
 EffectItem: (String, Value) = {
-    <k:Identifier> ":" <v:Literal> => (k, v),
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
 };
 
 Section: lang::Section = {
-    "section" <name:Identifier> "{" <items:Comma<SectionItem>> "}" => {
+    "section" <name:Identifier> "{" <items:SectionItem*> "}" => {
         let mut sec = lang::Section { name, ..Default::default() };
         for item in items {
             match item {
@@ -103,12 +106,12 @@ Section: lang::Section = {
 };
 
 SectionItem: SectionItem = {
-    "length" ":" <l:Integer> => SectionItem::Length(l as u32),
-    <t:Track> => SectionItem::Track(t),
+    "length" ":" <l:Integer> Separator? => SectionItem::Length(l as u32),
+    <t:Track> Separator? => SectionItem::Track(t),
 };
 
 Track: lang::Track = {
-    "track" <name:Identifier> "{" <items:Comma<TrackItem>> "}" => {
+    "track" <name:Identifier> "{" <items:TrackItem*> "}" => {
         let mut track = lang::Track { name, ..Default::default() };
         for item in items {
             match item {
@@ -122,13 +125,23 @@ Track: lang::Track = {
 };
 
 TrackItem: TrackItem = {
-    "instrument" ":" <i:Identifier> => TrackItem::Instrument(i),
-    "pattern" ":" <p:Pattern> => TrackItem::Pattern(p),
-    "send" ":" "{" <s:SendItem> "}" => TrackItem::Send(s),
+    "instrument" ":" <i:Identifier> Separator? => TrackItem::Instrument(i),
+    "pattern" ":" <p:Pattern> Separator? => TrackItem::Pattern(p),
+    "send" ":" "{" <s:SendSubItem*> "}" Separator? => {
+        let mut send = lang::SendEffect { to: String::new(), amount: 0.0 };
+        for (k, v) in s {
+            match k.as_str() {
+                "to" => if let Value::String(s) = v { send.to = s },
+                "amount" => if let Value::Float(f) = v { send.amount = f } else if let Value::Integer(i) = v { send.amount = i as f32 },
+                _ => {}
+            }
+        }
+        TrackItem::Send(send)
+    },
 };
 
-SendItem: lang::SendEffect = {
-    "to" ":" <to:String> "," "amount" ":" <amount:Float> => lang::SendEffect { to, amount },
+SendSubItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
 };
 
 Pattern: lang::Pattern = {
@@ -139,7 +152,7 @@ Pattern: lang::Pattern = {
     <s:String> => {
         lang::Pattern::Binary(s)
     },
-    "[" <v:Comma<PatternStep>> "]" => lang::Pattern::Notes(v.into_iter().enumerate().flat_map(|(i, steps)| {
+    "[" <v:PatternStepList> "]" => lang::Pattern::Notes(v.into_iter().enumerate().flat_map(|(i, steps)| {
         steps.into_iter().map(move |notes| lang::NoteEvent {
             time_steps: i as u32,
             notes,
@@ -149,17 +162,22 @@ Pattern: lang::Pattern = {
     }).collect()),
 };
 
+PatternStepList: Vec<Vec<Vec<String>>> = {
+    <v:(<PatternStep> Separator?)*> => v
+};
+
 PatternStep: Vec<Vec<String>> = {
     "_" => vec![],
     <n:Identifier> => vec![vec![n]],
-    "[" <v:Comma<Identifier>> "]" => vec![v],
+    "[" <v:IdentifierList> "]" => vec![v],
 };
 
 Literal: lang::Value = {
     <f:Float> => Value::Float(f),
     <i:Integer> => Value::Integer(i),
     <s:String> => Value::String(s),
-    "{" <items:Comma<CompositionItem>> "}" => {
+    <id:Identifier> => Value::String(id),
+    "{" <items:CompositionItem*> "}" => {
         let mut map = HashMap::new();
         for (k, v) in items {
             map.insert(k, v);
@@ -172,13 +190,10 @@ Literal: lang::Value = {
 
 Identifier: String = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s.to_string();
 String: String = <s:r#""([^"\\]|\\.)*""#> => s[1..s.len()-1].to_string();
-Integer: i64 = <s:r"[0-9]+"> => s.parse().unwrap();
-Float: f32 = <s:r"[0-9]+\.[0-9]*"> => s.parse().unwrap();
+Integer: i64 = <s:r"-?[0-9]+"> => s.parse().unwrap();
+Float: f32 = <s:r"-?[0-9]+\.[0-9]+"> => s.parse().unwrap();
 
-// Comma separated list helper
-Comma<T>: Vec<T> = {
-    <v:(<T> ",")*> <e:T?> => match e {
-        None => v,
-        Some(e) => { let mut v = v; v.push(e); v }
-    }
+Separator: () = {
+    "," => (),
+    ";" => (),
 };

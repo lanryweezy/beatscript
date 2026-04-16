@@ -1,5 +1,7 @@
 //! BeatScript V12 Cosmos - Language Definition (AST)
 
+// This version is simplified and cleaned for compilability.
+
 use std::collections::HashMap;
 
 pub type NodeId = u64;
@@ -92,6 +94,7 @@ pub enum Waveform {
     Sine, Saw, Square, Triangle, Noise
 }
 
+// Add the missing types to fix compilation errors
 #[derive(Debug, Clone)]
 pub enum Value {
     Float(f32),

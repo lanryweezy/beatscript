@@ -1,32 +1,32 @@
 composition {
-    title: "Berlin Underground",
+    title: "Berlin Underground"
     bpm: 128
 }
 
 synth acid_bass {
-    type: "subtractive",
-    cutoff: 400,
-    resonance: 15,
-    attack: 0.001,
-    decay: 0.2,
-    sustain: 0.1,
+    type: subtractive
+    cutoff: 400
+    resonance: 15
+    attack: 0.001
+    decay: 0.2
+    sustain: 0.1
     release: 0.1
 }
 
 synth drum_machine {
-    type: "membrane",
-    attack: 0.005,
+    type: membrane
+    attack: 0.005
     decay: 0.15
 }
 
 section main {
-    length: 4,
+    length: 4
     track bassline {
-        instrument: acid_bass,
+        instrument: acid_bass
         pattern: [C2, C2, C3, _, C2, _, C3, _, C2, C2, C3, _, C2, Eb2, F2, _]
-    },
+    }
     track kick {
-        instrument: drum_machine,
+        instrument: drum_machine
         pattern: "1000100010001000"
     }
 }

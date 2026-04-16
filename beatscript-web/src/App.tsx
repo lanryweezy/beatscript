@@ -128,6 +128,7 @@ const BeatScriptApp: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showMixer, setShowMixer] = useState(false);
+  const [showSamples, setShowSamples] = useState(false);
   const [projects, setProjects] = useState<Record<string, string>>(() => {
      const saved = localStorage.getItem('beatscript_projects');
      return saved ? JSON.parse(saved) : {};
@@ -142,6 +143,31 @@ const BeatScriptApp: React.FC = () => {
   const activeSequences = useRef<Map<string, Tone.Sequence>>(new Map());
 
   useEffect(() => {
+    // MIDI Setup
+    if (navigator.requestMIDIAccess) {
+       navigator.requestMIDIAccess().then(access => {
+          access.inputs.forEach(input => {
+             input.onmidimessage = (e: any) => {
+                const [status, note, velocity] = e.data;
+                if (status === 144 && velocity > 0) { // Note On
+                   const synthKeys = Object.keys(synths.current);
+                   if (synthKeys.length > 0) {
+                      const firstSynth = synths.current[synthKeys[0]];
+                      const freq = Tone.Frequency(note, "midi").toFrequency();
+                      firstSynth.triggerAttack(freq);
+                   }
+                } else if (status === 128 || (status === 144 && velocity === 0)) { // Note Off
+                   const synthKeys = Object.keys(synths.current);
+                   if (synthKeys.length > 0) {
+                      const firstSynth = synths.current[synthKeys[0]];
+                      firstSynth.triggerRelease();
+                   }
+                }
+             };
+          });
+       });
+    }
+
     analyser.current = new Tone.Analyser('waveform', 32);
     limiter.current = new Tone.Limiter(-1).toDestination();
     analyser.current.connect(limiter.current);
@@ -394,12 +420,27 @@ const BeatScriptApp: React.FC = () => {
         isPlaying={isPlaying} onTogglePlay={handleTogglePlay}
       />
 
+      {showSamples && (
+         <div className="absolute inset-0 bg-black/95 backdrop-blur-xl z-[100] p-12 flex flex-col gap-8">
+            <div className="flex justify-between items-center">
+               <h2 className="text-4xl font-black italic tracking-tighter">SAMPLE MANAGER</h2>
+               <button onClick={() => setShowSamples(false)} className="text-gray-500 font-bold">CLOSE [X]</button>
+            </div>
+            <div className="flex-1 flex items-center justify-center border-2 border-dashed border-white/10 rounded-3xl group hover:border-beatscript-purple/50 transition-all cursor-pointer">
+               <div className="text-center">
+                  <Download className="mx-auto mb-4 text-gray-500 group-hover:text-beatscript-purple" size={48} />
+                  <p className="font-bold text-gray-500 uppercase tracking-widest">Drop samples here to load</p>
+               </div>
+            </div>
+         </div>
+      )}
+
       <main className="flex flex-1 overflow-hidden">
         <div className="w-16 border-r border-white/10 flex flex-col items-center py-8 gap-10 shrink-0 bg-[#111111]">
            <FolderOpen size={22} className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" onClick={() => setShowLibrary(true)} />
            <Sliders size={22} className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" onClick={() => setShowMixer(true)} />
            <Activity size={22} className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" onClick={() => setShowConsole(true)} />
-           <Layout size={22} className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" />
+           <Layout size={22} className="text-gray-500 hover:text-beatscript-purple cursor-pointer transition-colors" onClick={() => setShowSamples(true)} />
         </div>
 
         <div className="flex-1 flex flex-col relative">

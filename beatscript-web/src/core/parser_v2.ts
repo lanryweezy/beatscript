@@ -115,9 +115,28 @@ export const parseBeatScriptEnhanced = (str: string): ParseResult => {
         const sendM = tContent.match(/send:\s*\{\s*to:\s*["']?(\w+)["']?,\s*amount:\s*(\d+\.?\d*)\s*\}/);
         if (sendM) track.send = { to: sendM[1], amount: parseFloat(sendM[2]) };
 
-        const patM = tContent.match(/pattern:\s*(euclidean\([^)]*\)|["'][\d]+["']|\[[^\]]*\])/);
-        if (patM) {
-          const val = patM[1].trim();
+        let val = "";
+        const patIdx = tContent.indexOf("pattern:");
+        if (patIdx !== -1) {
+          const afterPat = tContent.slice(patIdx + 8).trim();
+          if (afterPat.startsWith("euclidean")) {
+            val = afterPat.match(/euclidean\([^)]*\)/)?.[0] || "";
+          } else if (afterPat.startsWith('"') || afterPat.startsWith("'")) {
+            const quote = afterPat[0];
+            const endIdx = afterPat.indexOf(quote, 1);
+            if (endIdx !== -1) val = afterPat.slice(0, endIdx + 1);
+          } else if (afterPat.startsWith("[")) {
+            let depth = 0;
+            for (let i = 0; i < afterPat.length; i++) {
+              if (afterPat[i] === '[') depth++;
+              if (afterPat[i] === ']') depth--;
+              val += afterPat[i];
+              if (depth === 0) break;
+            }
+          }
+        }
+
+        if (val) {
           if (val.startsWith('euclidean')) {
             const p = val.match(/\(([^)]*)\)/);
             if (p) {
