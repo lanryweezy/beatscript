@@ -60,7 +60,10 @@ This repository contains two main implementations of BeatScript:
 BeatScript is designed for zero-config deployments. You can deploy the Web Studio instantly:
 
 ### Option 1: Vercel / Netlify (Recommended)
-1.  Connect your GitHub repository to [Vercel](https://vercel.com) or [Netlify](https://netlify.com).
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fjules%2Fbeatscript&root-directory=beatscript-web)
+
+1.  Click the button above or connect your GitHub repository to [Vercel](https://vercel.com) or [Netlify](https://netlify.com).
 2.  Set the **Root Directory** to `beatscript-web`.
 3.  The **Build Command** and **Output Directory** will be detected automatically (`npm run build` and `dist`).
 
