@@ -168,6 +168,10 @@ impl SectionPlayer {
                             println!("  > Section '{}': Triggering note {} ({}) on synth {}", self.name, note_name, midi, synth_id);
                             synth.note_on(midi);
                         }
+                        println!("  > Section '{}': Triggering note {} on synth {}", self.name, note.notes[0], synth_id);
+                        // For now, just try to parse the note as a frequency if it's numeric-ish, or mapping it.
+                        // This is a placeholder for real note-to-frequency mapping.
+                        synth.note_on(60); // Default to Middle C for now
                     }
                 }
             }
@@ -241,4 +245,8 @@ pub fn note_to_midi(name: &str) -> u8 {
 
     let octave = next.and_then(|c| c.to_digit(10)).unwrap_or(4) as i32;
     (12 * (octave + 1) + note + offset) as u8
+}
+        Pattern::Notes(notes) => notes.clone(),
+        _ => vec![]
+    }
 }

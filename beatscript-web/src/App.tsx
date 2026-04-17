@@ -14,6 +14,31 @@ import { StudioMixer } from './components/studio/StudioMixer';
 import { StudioHeader } from './components/studio/StudioHeader';
 
 const PRESETS: Record<string, string> = {
+import React, { useState, useEffect, useRef } from 'react';
+import * as Tone from 'tone';
+import Editor, { loader } from '@monaco-editor/react';
+import { Play, Square, Music, Cpu, Zap, Activity, Download, Settings, BookOpen, Copy, Check, Sparkles } from 'lucide-react';
+
+// --- Types ---
+interface BeatScript {
+  bpm: number;
+  sections: Record<string, Section>;
+  synths: Record<string, any>;
+  timeline: string[];
+}
+
+interface Section {
+  length: number;
+  tracks: Record<string, Track>;
+}
+
+interface Track {
+  instrument: string;
+  pattern: string | string[];
+}
+
+// --- Presets ---
+const PRESETS = {
   "Neon Sunset": `composition {
   title: "Neon Sunset",
   bpm: 95

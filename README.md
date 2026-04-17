@@ -78,6 +78,33 @@ This project includes a pre-configured GitHub Action (`.github/workflows/deploy.
 - **Sample Manager:** Drag and drop your own WAV/MP3 samples directly into the browser.
 - **MIDI Integration:** Plug in your MIDI controller and play the internal synths live.
 - **Shareable URLs:** Every composition is encoded into a unique URL hash. Share your music with a single link.
+1.  **BeatScript Web (Legacy/Demo):** A simple browser-based player using Tone.js (currently being upgraded to a modern React/TypeScript application).
+2.  **BeatScript Cosmos:** A next-generation high-performance audio engine written in Rust, featuring a projectional IDE.
+
+## Getting Started
+
+### Using the Web Demo
+
+#### Modern Web Player (React + TypeScript)
+We are building a modern, interactive web player. To run it locally:
+1.  Navigate to `beatscript-web`.
+2.  Install dependencies: `npm install`.
+3.  Start the dev server: `npm run dev`.
+4.  Open your browser to the provided URL (usually `http://localhost:5173`).
+
+#### Legacy Web Player
+For a simple, zero-dependency experience, you can open `t.html` directly in your browser.
+
+### Exploring the Cosmos Engine (Rust)
+
+The Cosmos engine is located in the `beatscript-cosmos` directory. It uses the Iced GUI framework and CPAL for low-latency audio.
+
+```bash
+cd beatscript-cosmos
+cargo run
+```
+
+*(Note: Requires Rust and system audio libraries like ALSA on Linux)*
 
 ## Example BeatScript
 

@@ -1,4 +1,5 @@
 // LALRPOP Grammar for a more expressive BeatScript V12
+// LALRPOP Grammar for a more expressive BeatScript
 
 use crate::lang::{self, TopLevelItem, SectionItem, TrackItem, Value};
 use std::collections::HashMap;
@@ -47,6 +48,7 @@ Composition: lang::Composition = {
 
 CompositionItem: (String, Value) = {
     <k:Identifier> ":" <v:Literal> Separator? => (k, v),
+    <k:Identifier> ":" <v:Literal> => (k, v),
 };
 
 Timeline: Vec<String> = {
@@ -72,6 +74,7 @@ Synth: lang::Synth = {
 
 SynthItem: (String, Value) = {
     <k:Identifier> ":" <v:Literal> Separator? => (k, v),
+    <k:Identifier> ":" <v:Literal> => (k, v),
 };
 
 FxChain: lang::FxChain = {
@@ -90,6 +93,7 @@ Effect: lang::Effect = {
 
 EffectItem: (String, Value) = {
     <k:Identifier> ":" <v:Literal> Separator? => (k, v),
+    <k:Identifier> ":" <v:Literal> => (k, v),
 };
 
 Section: lang::Section = {
@@ -156,6 +160,21 @@ Pattern: lang::Pattern = {
         steps.into_iter().map(move |notes| lang::NoteEvent {
             time_steps: i as u32,
             notes,
+    "instrument" ":" <i:Identifier> => TrackItem::Instrument(i),
+    "pattern" ":" <p:Pattern> => TrackItem::Pattern(p),
+    "send" ":" "{" <s:SendItem> "}" => TrackItem::Send(s),
+};
+
+SendItem: lang::SendEffect = {
+    "to" ":" <to:String> "," "amount" ":" <amount:Float> => lang::SendEffect { to, amount },
+};
+
+Pattern: lang::Pattern = {
+    "euclid" "(" <h:Integer> "," <s:Integer> ")" => lang::Pattern::Euclidean { hits: h as u8, steps: s as u8 },
+    "[" <v:Comma<PatternStep>> "]" => lang::Pattern::Notes(v.into_iter().enumerate().filter_map(|(i, step)| {
+        step.map(|note| lang::NoteEvent {
+            time_steps: i as u32,
+            notes: vec![note],
             velocity: 100,
             duration_steps: 1,
         })
@@ -170,6 +189,9 @@ PatternStep: Vec<Vec<String>> = {
     "_" => vec![],
     <n:Identifier> => vec![vec![n]],
     "[" <v:IdentifierList> "]" => vec![v],
+PatternStep: Option<String> = {
+    "_" => None,
+    <n:Identifier> => Some(n),
 };
 
 Literal: lang::Value = {
@@ -178,6 +200,7 @@ Literal: lang::Value = {
     <s:String> => Value::String(s),
     <id:Identifier> => Value::String(id),
     "{" <items:CompositionItem*> "}" => {
+    "{" <items:Comma<CompositionItem>> "}" => {
         let mut map = HashMap::new();
         for (k, v) in items {
             map.insert(k, v);
@@ -196,4 +219,13 @@ Float: f32 = <s:r"-?[0-9]+\.[0-9]+"> => s.parse().unwrap();
 Separator: () = {
     "," => (),
     ";" => (),
+Integer: i64 = <s:r"[0-9]+"> => s.parse().unwrap();
+Float: f32 = <s:r"[0-9]+\.[0-9]*"> => s.parse().unwrap();
+
+// Comma separated list helper
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => { let mut v = v; v.push(e); v }
+    }
 };

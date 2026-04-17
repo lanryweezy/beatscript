@@ -1,6 +1,9 @@
+// Ambient Space
+// Showcasing FX chains and long decays
+
 composition {
-    title: "Ambient Space"
-    artist: "Aethel"
+    title: "Ambient Space",
+    artist: "Aethel",
     bpm: 60
 }
 
@@ -19,6 +22,12 @@ fx_chain deep_reverb {
     delay {
         time: 0.75
         feedback: 0.6
+        size: 0.95,
+        wet: 0.5
+    }
+    delay {
+        time: 0.75,
+        feedback: 0.6,
         wet: 0.3
     }
 }

@@ -87,6 +87,14 @@ track pads {
 ```
 
 ### FX Chains
+### Euclidean Rhythms (Cosmos Engine only)
+Generate rhythmic patterns mathematically.
+
+```beatscript
+pattern: euclid(5, 8) // 5 hits distributed over 8 steps
+```
+
+### FX Chains (Cosmos Engine only)
 Define reusable effect chains.
 
 ```beatscript
