@@ -163,6 +163,11 @@ impl SectionPlayer {
                 let note_start_sample = (note.time_steps as f32 * samples_per_16th) as u64;
                 if playhead_samples == note_start_sample {
                     if let Some(synth) = synths.get_mut(synth_id) {
+                        if let Some(note_name) = note.notes.get(0) {
+                            let midi = note_to_midi(note_name);
+                            println!("  > Section '{}': Triggering note {} ({}) on synth {}", self.name, note_name, midi, synth_id);
+                            synth.note_on(midi);
+                        }
                         println!("  > Section '{}': Triggering note {} on synth {}", self.name, note.notes[0], synth_id);
                         // For now, just try to parse the note as a frequency if it's numeric-ish, or mapping it.
                         // This is a placeholder for real note-to-frequency mapping.
@@ -176,6 +181,71 @@ impl SectionPlayer {
 
 fn unroll_pattern(pattern: &Pattern) -> Vec<NoteEvent> {
     match pattern {
+        Pattern::Binary(s) => {
+            let mut notes = vec![];
+            for (i, char) in s.chars().enumerate() {
+                if char == '1' {
+                    notes.push(NoteEvent {
+                        time_steps: i as u32,
+                        notes: vec!["C3".to_string()],
+                        velocity: 100,
+                        duration_steps: 1,
+                    });
+                }
+            }
+            notes
+        },
+        Pattern::Notes(notes) => notes.clone(),
+        Pattern::Euclidean { hits, steps, rotate } => {
+            let mut notes = vec![];
+            let k = *hits as f32;
+            let n = *steps as f32;
+            for i in 0..*steps {
+                let val = ((i as f32 * k) / n).floor() != (((i as f32 - 1.0) * k) / n).floor();
+                if val {
+                    // Apply rotation
+                    let rotated_i = (i as u32 + *rotate as u32) % *steps as u32;
+                    notes.push(NoteEvent {
+                        time_steps: rotated_i,
+                        notes: vec!["C3".to_string()], // Default for Euclidean
+                        velocity: 100,
+                        duration_steps: 1,
+                    });
+                }
+            }
+            notes.sort_by_key(|n| n.time_steps);
+            notes
+        }
+    }
+}
+
+/// Simple utility to convert note names (e.g., "C3", "Eb4") to MIDI numbers.
+pub fn note_to_midi(name: &str) -> u8 {
+    let mut parts = name.chars();
+    let note = match parts.next() {
+        Some('C') => 0,
+        Some('D') => 2,
+        Some('E') => 4,
+        Some('F') => 5,
+        Some('G') => 7,
+        Some('A') => 9,
+        Some('B') => 11,
+        _ => 0,
+    };
+
+    let mut next = parts.next();
+    let mut offset = 0;
+    if next == Some('b') {
+        offset = -1;
+        next = parts.next();
+    } else if next == Some('#') {
+        offset = 1;
+        next = parts.next();
+    }
+
+    let octave = next.and_then(|c| c.to_digit(10)).unwrap_or(4) as i32;
+    (12 * (octave + 1) + note + offset) as u8
+}
         Pattern::Notes(notes) => notes.clone(),
         _ => vec![]
     }

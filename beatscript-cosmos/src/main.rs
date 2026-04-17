@@ -132,35 +132,29 @@ impl Application for JanusApp {
         let (command_sender, _command_receiver) = mpsc::channel();
 
         let initial_code = r#"
-// Welcome to the BeatScript X "Janus" IDE
-// Click on a line below to see the Projectional UI change.
+// BeatScript Cosmos IDE
+// High-performance algorithmic composition
 
-let main_synth = synth({
-    frequency: 440.0,
-    amplitude: 0.5,
-    attack: 0.1,
-    decay: 0.3,
-    sustain: 0.7,
-    release: 0.2
-});
+composition {
+    title: "Cosmos Genesis",
+    bpm: 120
+}
 
-let vibrato = lfo({
-    freq: 4.5,
-    depth: 0.2
-});
+synth lead {
+    type: "subtractive",
+    cutoff: 1200,
+    resonance: 5
+}
 
-let filter_env = filter({
-    cutoff: 1000.0,
-    resonance: 0.7,
-    type: 0
-});
+section main {
+    length: 4
+    track melody {
+        instrument: lead,
+        pattern: [C3, E3, G3, B3, C4, _, _, _]
+    }
+}
 
-let delay_fx = delay({
-    delay: 0.2,
-    feedback: 0.3
-});
-
-out: main_synth;
+timeline: [main]
 "#;
 
         let mut mixer_controls = Vec::new();
@@ -440,27 +434,32 @@ out: main_synth;
 impl JanusApp {
     // This function inspects a line of code and decides what UI to project.
     fn update_projection_from_line(&mut self, line: &str) {
-        if line.contains("rate:") || line.contains("freq:") || line.contains("frequency:") {
+        if line.contains("bpm:") {
             let value = line.split(":").last()
-                .and_then(|s| s.trim().parse::<f32>().ok())
-                .unwrap_or(1.0);
+                .and_then(|s| s.trim().replace(",", "").parse::<f32>().ok())
+                .unwrap_or(120.0);
             self.projection_view = Projection::Knob { 
-                label: "Frequency/Rate".to_string(), 
+                label: "Global Tempo".to_string(),
                 value, 
-                range: (0.1, 20.0) 
+                range: (40.0, 240.0)
             };
-        } else if line.contains("pattern([") {
+        } else if line.contains("pattern:") {
             self.projection_view = Projection::PianoRoll { pattern: vec![] };
-        } else if line.contains("synth(") || line.contains("oscillator") || line.contains("voice") {
+        } else if line.contains("synth") {
             self.projection_view = Projection::MixerStrip { 
-                channel: "Main Synth".to_string(), 
+                channel: "Synth Params".to_string(),
                 volume: 0.7, 
                 pan: 0.0 
             };
-        } else if line.contains("filter") || line.contains("cutoff") {
-            self.projection_view = Projection::SpectrumAnalyzer;
-        } else {
-            // self.projection_view = Projection::Empty;
+        } else if line.contains("cutoff:") || line.contains("resonance:") {
+            let value = line.split(":").last()
+                .and_then(|s| s.trim().replace(",", "").parse::<f32>().ok())
+                .unwrap_or(1000.0);
+            self.projection_view = Projection::Knob {
+                label: "Filter".to_string(),
+                value,
+                range: (20.0, 20000.0)
+            };
         }
     }
     

@@ -68,6 +68,25 @@ timeline: [verse, chorus, verse, fade]
 
 ## Advanced Features
 
+### Euclidean Rhythms
+Generate rhythmic patterns mathematically based on Euclidean algorithm distribution.
+
+```beatscript
+pattern: euclidean(5, 16)         // 5 hits evenly distributed over 16 steps
+pattern: euclidean(3, 8, 1)      // 3 hits over 8 steps, rotated by 1
+```
+
+### Chords and Polyphony
+Tracks can play multiple notes simultaneously using chord notation or nested arrays.
+
+```beatscript
+track pads {
+    instrument: "polysynth",
+    pattern: [Cm7, _, F7, _, Bbmaj7, _, _, _]
+}
+```
+
+### FX Chains
 ### Euclidean Rhythms (Cosmos Engine only)
 Generate rhythmic patterns mathematically.
 

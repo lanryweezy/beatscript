@@ -21,6 +21,63 @@ BeatScript is a declarative, domain-specific language (DSL) designed for music c
 
 This repository contains two main implementations of BeatScript:
 
+1.  **BeatScript Web Studio:** A modern React/TypeScript IDE and performance environment. Features "Projection" visualizers, MIDI/WAV export, and session sharing.
+2.  **BeatScript Cosmos:** A high-performance native audio engine and IDE written in Rust, optimized for low-latency live coding.
+
+## Quick Start
+
+### 🎹 For Musicians (No Coding Required)
+1.  **Launch the Studio:** [Open the Hosted Studio](https://beatscript.io) (or run locally).
+2.  **Pick a Vibe:** Load a preset like "Neon Sunset" or "Berlin Underground" from the Library.
+3.  **Hit PLAY:** Experience the algorithmic magic.
+4.  **Tweak:** Click on patterns or synth parameters in the code; use the "Projection" sliders on the right to shape your sound in real-time.
+5.  **Record:** Hit the Record button to save your session as a high-quality audio file.
+
+### 🛠 For Developers & Sound Designers
+1.  **Clone the Repo:** `git clone https://github.com/jules/beatscript.git`
+2.  **Web Studio (React):**
+    ```bash
+    cd beatscript-web
+    npm install
+    npm run dev
+    ```
+3.  **Native Engine (Rust):**
+    ```bash
+    cd beatscript-cosmos
+    cargo run
+    ```
+    *Prerequisites: `libasound2-dev` on Linux.*
+
+4.  **CLI Tools:**
+    Validate your scripts using the `beatscript-cli`:
+    ```bash
+    cd beatscript-cosmos
+    cargo run --bin beatscript-cli -- validate ../examples/acid_techno.beat
+    ```
+
+## 🚀 Instant Deployment
+
+BeatScript is designed for zero-config deployments. You can deploy the Web Studio instantly:
+
+### Option 1: Vercel / Netlify (Recommended)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fjules%2Fbeatscript&root-directory=beatscript-web)
+
+1.  Click the button above or connect your GitHub repository to [Vercel](https://vercel.com) or [Netlify](https://netlify.com).
+2.  Set the **Root Directory** to `beatscript-web`.
+3.  The **Build Command** and **Output Directory** will be detected automatically (`npm run build` and `dist`).
+
+### Option 2: GitHub Pages
+This project includes a pre-configured GitHub Action (`.github/workflows/deploy.yml`). Simply push your changes to `main`, and your Studio will be live at `https://<your-username>.github.io/beatscript`.
+
+## Modern Features for Mass Adoption
+
+- **Euclidean Rhythm Generator:** Create complex, mathematical beats with `euclidean(hits, steps, rotate)`.
+- **Projection UI:** A bridge between code and touch. Click any code block to reveal interactive GUI controls.
+- **Polyphonic Support:** Compose rich textures using chord notation (e.g., `[Cmaj7, _, Am7, _]`).
+- **Sample Manager:** Drag and drop your own WAV/MP3 samples directly into the browser.
+- **MIDI Integration:** Plug in your MIDI controller and play the internal synths live.
+- **Shareable URLs:** Every composition is encoded into a unique URL hash. Share your music with a single link.
 1.  **BeatScript Web (Legacy/Demo):** A simple browser-based player using Tone.js (currently being upgraded to a modern React/TypeScript application).
 2.  **BeatScript Cosmos:** A next-generation high-performance audio engine written in Rust, featuring a projectional IDE.
 

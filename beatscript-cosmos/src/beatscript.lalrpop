@@ -1,3 +1,4 @@
+// LALRPOP Grammar for a more expressive BeatScript V12
 // LALRPOP Grammar for a more expressive BeatScript
 
 use crate::lang::{self, TopLevelItem, SectionItem, TrackItem, Value};
@@ -5,7 +6,6 @@ use std::collections::HashMap;
 
 grammar;
 
-// The parser will produce a Project struct.
 pub Project: lang::Project = {
     <items:TopLevelItem*> => {
         let mut proj = lang::Project::default();
@@ -47,11 +47,16 @@ Composition: lang::Composition = {
 };
 
 CompositionItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
     <k:Identifier> ":" <v:Literal> => (k, v),
 };
 
 Timeline: Vec<String> = {
-    "timeline" ":" "[" <v:Comma<Identifier>> "]" => v,
+    "timeline" ":" "[" <v:IdentifierList> "]" => v,
+};
+
+IdentifierList: Vec<String> = {
+    <v:(<Identifier> Separator?)*> => v
 };
 
 Synth: lang::Synth = {
@@ -68,6 +73,7 @@ Synth: lang::Synth = {
 };
 
 SynthItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
     <k:Identifier> ":" <v:Literal> => (k, v),
 };
 
@@ -86,6 +92,7 @@ Effect: lang::Effect = {
 };
 
 EffectItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
     <k:Identifier> ":" <v:Literal> => (k, v),
 };
 
@@ -103,8 +110,8 @@ Section: lang::Section = {
 };
 
 SectionItem: SectionItem = {
-    "length" ":" <l:Integer> => SectionItem::Length(l as u32),
-    <t:Track> => SectionItem::Track(t),
+    "length" ":" <l:Integer> Separator? => SectionItem::Length(l as u32),
+    <t:Track> Separator? => SectionItem::Track(t),
 };
 
 Track: lang::Track = {
@@ -122,6 +129,37 @@ Track: lang::Track = {
 };
 
 TrackItem: TrackItem = {
+    "instrument" ":" <i:Identifier> Separator? => TrackItem::Instrument(i),
+    "pattern" ":" <p:Pattern> Separator? => TrackItem::Pattern(p),
+    "send" ":" "{" <s:SendSubItem*> "}" Separator? => {
+        let mut send = lang::SendEffect { to: String::new(), amount: 0.0 };
+        for (k, v) in s {
+            match k.as_str() {
+                "to" => if let Value::String(s) = v { send.to = s },
+                "amount" => if let Value::Float(f) = v { send.amount = f } else if let Value::Integer(i) = v { send.amount = i as f32 },
+                _ => {}
+            }
+        }
+        TrackItem::Send(send)
+    },
+};
+
+SendSubItem: (String, Value) = {
+    <k:Identifier> ":" <v:Literal> Separator? => (k, v),
+};
+
+Pattern: lang::Pattern = {
+    "euclidean" "(" <h:Integer> "," <s:Integer> <r:("," Integer)?> ")" => {
+        let rotate = r.map(|(_, val)| val as u8).unwrap_or(0);
+        lang::Pattern::Euclidean { hits: h as u8, steps: s as u8, rotate }
+    },
+    <s:String> => {
+        lang::Pattern::Binary(s)
+    },
+    "[" <v:PatternStepList> "]" => lang::Pattern::Notes(v.into_iter().enumerate().flat_map(|(i, steps)| {
+        steps.into_iter().map(move |notes| lang::NoteEvent {
+            time_steps: i as u32,
+            notes,
     "instrument" ":" <i:Identifier> => TrackItem::Instrument(i),
     "pattern" ":" <p:Pattern> => TrackItem::Pattern(p),
     "send" ":" "{" <s:SendItem> "}" => TrackItem::Send(s),
@@ -143,6 +181,14 @@ Pattern: lang::Pattern = {
     }).collect()),
 };
 
+PatternStepList: Vec<Vec<Vec<String>>> = {
+    <v:(<PatternStep> Separator?)*> => v
+};
+
+PatternStep: Vec<Vec<String>> = {
+    "_" => vec![],
+    <n:Identifier> => vec![vec![n]],
+    "[" <v:IdentifierList> "]" => vec![v],
 PatternStep: Option<String> = {
     "_" => None,
     <n:Identifier> => Some(n),
@@ -152,6 +198,8 @@ Literal: lang::Value = {
     <f:Float> => Value::Float(f),
     <i:Integer> => Value::Integer(i),
     <s:String> => Value::String(s),
+    <id:Identifier> => Value::String(id),
+    "{" <items:CompositionItem*> "}" => {
     "{" <items:Comma<CompositionItem>> "}" => {
         let mut map = HashMap::new();
         for (k, v) in items {
@@ -165,6 +213,12 @@ Literal: lang::Value = {
 
 Identifier: String = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s.to_string();
 String: String = <s:r#""([^"\\]|\\.)*""#> => s[1..s.len()-1].to_string();
+Integer: i64 = <s:r"-?[0-9]+"> => s.parse().unwrap();
+Float: f32 = <s:r"-?[0-9]+\.[0-9]+"> => s.parse().unwrap();
+
+Separator: () = {
+    "," => (),
+    ";" => (),
 Integer: i64 = <s:r"[0-9]+"> => s.parse().unwrap();
 Float: f32 = <s:r"[0-9]+\.[0-9]*"> => s.parse().unwrap();
 

@@ -55,7 +55,8 @@ pub struct SendEffect {
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Euclidean { hits: u8, steps: u8 },
+    Euclidean { hits: u8, steps: u8, rotate: u8 },
+    Binary(String),
     Notes(Vec<NoteEvent>),
 }
 
@@ -140,4 +141,5 @@ pub enum TrackItem {
     Instrument(String),
     Pattern(Pattern),
     Send(SendEffect),
+}
 }
